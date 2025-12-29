@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { google } from 'googleapis';
-import { getOrCreateMichioFolder } from "@/lib/drive";
+import { getOrCreateMichioFolder, getOrCreateSubfolder } from "@/lib/drive";
 
 export const POST = auth(async function POST(req) {
   if (!req.auth) return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
@@ -13,22 +13,15 @@ export const POST = auth(async function POST(req) {
   const drive = google.drive({ version: 'v3', auth: authClient });
 
   try {
-    const folderId = await getOrCreateMichioFolder(drive);
+    const rootId = await getOrCreateMichioFolder(drive);
+    
+    // Create Subfolders
+    await getOrCreateSubfolder(drive, rootId, 'core');
+    await getOrCreateSubfolder(drive, rootId, 'history');
+    await getOrCreateSubfolder(drive, rootId, 'media');
+    await getOrCreateSubfolder(drive, rootId, 'misc');
 
-    // Create a welcome file to prove it works
-    await drive.files.create({
-      requestBody: {
-        name: 'Welcome to Michio.md',
-        parents: [folderId],
-        mimeType: 'text/markdown',
-      },
-      media: {
-        mimeType: 'text/markdown',
-        body: '# Welcome to your Michio Journal\n\nThis is the start of your journey. Michio will read files in this folder to assist you.',
-      },
-    });
-
-    return NextResponse.json({ message: "Journal created successfully!" });
+    return NextResponse.json({ message: "Structure created: core, history, media, misc" });
   } catch (error: any) {
     console.error("Setup error:", error);
     return NextResponse.json({ message: error.message }, { status: 500 });

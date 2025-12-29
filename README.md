@@ -25,10 +25,11 @@ Unlike traditional assistants, Mich.io is built on the Bring Your Own (BYO) prin
 - Agentic PKM Uses Model Context Protocol (MCP) to interact with your data silos as if they were a single memory.
 
 ## 🛠 Tech Stack
-- Framework Next.js (PWA), future as a desktop companion and/or mobile native app.
-- AI Engine Gemini 1.53 Pro, or OpenAI for guest mode, or local AI setup. User can provide their own API keys.
-- Protocol MCP (Model Context Protocol). Easy to implement, easy to use. MArketplace for companies to build tools and plugins.
-- Primary Sinks Notion API, Google Drive API, Google Health Connect.
+- **Framework**: Next.js 14+ (App Router).
+- **Storage Strategy**: **Local First** (Dexie.js / IndexedDB). Core functionality works 100% locally.
+- **Sync Module**: Google Drive Sync (Optional). Acts as a backup/sync layer if the user chooses to connect.
+- **AI Engine**: Groq (Llama 3.3 70B) for reasoning.
+- **Protocol**: MCP (Model Context Protocol) for future extensibility.
 
 ## UI features
 - main screen: voice or text input, live voice mode, 

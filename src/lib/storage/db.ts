@@ -1,0 +1,45 @@
+import Dexie, { Table } from 'dexie';
+
+export interface FileRecord {
+    path: string; // Primary Key
+    content: string;
+    updatedAt: number;
+    remoteId?: string; // Google Drive ID (Indexed)
+    type: 'file' | 'folder';
+    dirty?: number; // 1 if dirty, 0 or undefined if clean (Indexed for fast lookup)
+    deleted?: number; // 1 if deleted
+}
+
+export interface SettingRecord {
+    key: string;
+    value: any;
+}
+
+export class MichioDB extends Dexie {
+    files!: Table<FileRecord>;
+    settings!: Table<SettingRecord>;
+
+    constructor() {
+        super('michio-db');
+        this.version(1).stores({
+            files: 'path, remoteId, type, updatedAt'
+        });
+        
+        // Add settings table in version 2
+        this.version(2).stores({
+            settings: 'key'
+        });
+
+        // Add dirty/deleted index in version 3
+        this.version(3).stores({
+            files: 'path, remoteId, type, updatedAt, dirty, deleted'
+        }).upgrade(tx => {
+             return tx.table("files").toCollection().modify(file => {
+                file.dirty = 0;
+                file.deleted = 0;
+            });
+        });
+    }
+}
+
+export const db = new MichioDB();

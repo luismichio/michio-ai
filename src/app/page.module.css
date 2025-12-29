@@ -70,82 +70,302 @@
   }
 }
 
-/* Auth & Chat Styles */
-.authBar {
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
+/* Main App Container (Full Viewport) */
+.main {
+  width: 100%;
+  height: 100dvh;
+  /* Dynamic viewport height for mobile */
   display: flex;
-  gap: 1rem;
+  flex-direction: column;
+  background: black;
+  /* Or your dark theme bg */
+  color: white;
+  overflow: hidden;
+  position: relative;
 }
 
-.authBtn {
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: #aaa;
+/* 1. Header (Fixed Top) */
+.header {
+  height: 60px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  /* 3 columns: Left spacer, Center title, Right auth */
+  align-items: center;
+  padding: 0 1rem;
+  background: rgba(0, 0, 0, 0.5);
+  /* Glass feel */
+  backdrop-filter: blur(10px);
+  z-index: 10;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.dateTitle {
+  grid-column: 2;
+  /* Place in center */
+  font-size: 1rem;
+  font-weight: 500;
+  color: #ddd;
   padding: 0.5rem 1rem;
   border-radius: 20px;
   cursor: pointer;
-  font-size: 0.8rem;
-  transition: all 0.2s;
-}
-
-.authBtn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-}
-
-.userBadge {
+  transition: background 0.2s;
   display: flex;
   align-items: center;
-  gap: 1rem;
-  font-size: 0.8rem;
-  color: #888;
+  gap: 0.5rem;
+  justify-content: center;
 }
 
-.chatSection {
-  width: 100%;
-  max-width: 600px;
-  background: rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  padding: 2rem;
-  border-radius: 12px;
-  margin-top: 2rem;
+.dateTitle:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
-.chatHint {
+.authBadge {
+  grid-column: 3;
+  /* Place in right */
+  justify-self: end;
+  /* Align to far right */
   font-size: 0.8rem;
   color: #666;
-  margin-bottom: 1rem;
-}
-
-.chatForm {
   display: flex;
   gap: 0.5rem;
+  align-items: center;
+}
+
+/* 2. Chat Area (Scrollable Middle) */
+.chatContainer {
+  flex: 1;
+  /* Takes remaining space */
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Center the stream width */
+  padding-bottom: 120px;
+  /* Space for fixed input */
+  scroll-behavior: smooth;
+}
+
+.chatStream {
+  width: 100%;
+  max-width: 800px;
+  padding: 2rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Messages */
+.message {
+  max-width: 85%;
+  line-height: 1.6;
+  font-size: 1rem;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.userMessage {
+  align-self: flex-end;
+  background: #2a2a2a;
+  /* Neutral dark grey */
+  color: #fff;
+  padding: 0.8rem 1.2rem;
+  border-radius: 18px;
+  border-bottom-right-radius: 4px;
+}
+
+.michioMessage {
+  align-self: flex-start;
+  color: #e0e0e0;
+  padding: 0.5rem 0;
+  /* More clean, less bubble-like */
+}
+
+/* 3. Input Area (Fixed Bottom) */
+.inputArea {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 1.5rem;
+  background: linear-gradient(to top, rgba(0, 0, 0, 1) 20%, rgba(0, 0, 0, 0));
+  z-index: 20;
+}
+
+.inputWrapper {
+  width: 100%;
+  max-width: 800px;
+  background: #1e1e1e;
+  border-radius: 24px;
+  display: flex;
+  align-items: center;
+  padding: 0.8rem 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
 }
 
 .chatInput {
   flex: 1;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 0.75rem;
-  border-radius: 8px;
-  color: #fff;
+  background: transparent;
+  border: none;
+  font-size: 1rem;
+  color: white;
+  outline: none;
+  min-height: 24px;
 }
 
-.chatBtn {
+.sendBtn {
   background: #3b82f6;
   color: white;
+  /* Icon color */
   border: none;
-  padding: 0 1.5rem;
-  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
+  margin-left: 0.5rem;
+  transition: background 0.2s;
 }
 
-.chatResponse {
-  margin-top: 1.5rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  color: #ddd;
-  line-height: 1.6;
+.sendBtn:disabled {
+  background: #333;
+  color: #555;
+  cursor: not-allowed;
+}
+
+/* Modal Overlay */
+.modalOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+}
+
+.modalContent {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 400px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  color: #333;
+  /* Force dark text on white modal */
+}
+
+/* Dark mode support logic can go here later */
+@media (prefers-color-scheme: dark) {
+  .modalContent {
+    background: #1a1a1a;
+    color: #fff;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* File Explorer Styles */
+.fileRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #f0f0f0;
+  transition: all 0.2s ease;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+  position: relative;
+  border-radius: 4px;
+  /* Slight rounded */
+  margin-bottom: 2px;
+}
+
+.fileRow:hover {
+  background: #f5f5f5;
+}
+
+.fileRow.selected {
+  background: #e6f7ff !important;
+  border-left: 4px solid #1890ff;
+  /* Strong indicator */
+}
+
+.kebabButton {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: #999;
+  border-radius: 4px;
+  opacity: 0;
+  /* Hidden by default */
+  transition: all 0.2s;
+}
+
+.fileRow:hover .kebabButton,
+.kebabButton.active {
+  opacity: 1;
+}
+
+.kebabButton:hover {
+  background: #eee;
+  color: #333;
+}
+
+.dropdownMenu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+  min-width: 140px;
+  padding: 4px 0;
+  overflow: hidden;
+}
+
+.dropdownItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.dropdownItem:hover {
+  background: #f0f0f0;
+}
+
+.dropdownItem.delete {
+  color: #ff4d4f;
+  border-top: 1px solid #f0f0f0;
+}
+
+.dropdownItem.delete:hover {
+  background: #fff1f0;
 }
