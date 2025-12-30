@@ -6,7 +6,7 @@ import { google } from 'googleapis';
 // Helper to get authorized drive client
 async function getDrive(req: any) {
     if (!req.auth) throw new Error("Not authenticated");
-    // @ts-expect-error - accessToken is added in auth.ts
+    // accessToken is added in auth.ts
     const accessToken = req.auth.accessToken;
     const authClient = new google.auth.OAuth2();
     authClient.setCredentials({ access_token: accessToken });

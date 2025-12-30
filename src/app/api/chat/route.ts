@@ -31,8 +31,10 @@ export const POST = auth(async function POST(req) {
         // But to keep it clean, let's just re-implement the basic "Read Daily Log" here if no client context
          if (validRootFiles.length > 0) {
              const file = validRootFiles[0];
-             const content = await getFileContent(file.id, accessToken);
-             context = `\n--- Source: ${file.name} ---\n${content}\n`;
+             if (file.id) {
+                 const content = await getFileContent(file.id, accessToken);
+                 context = `\n--- Source: ${file.name} ---\n${content}\n`;
+             }
          }
     } else {
         // C. No Context (Fresh Guest)

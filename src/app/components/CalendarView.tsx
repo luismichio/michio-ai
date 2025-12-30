@@ -39,7 +39,7 @@ export default function CalendarView({ onClose }: { onClose: () => void }) {
     try {
       const { db } = await import('@/lib/storage/db');
       const file = await db.files.get(`history/${date}.md`);
-      setLogContent(file?.content || "Empty log.");
+      setLogContent((file?.content as string) || "Empty log.");
     } catch (e) {
       setLogContent("Error loading log.");
     } finally {

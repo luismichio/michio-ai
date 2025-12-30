@@ -83,7 +83,7 @@ export async function appendToDailyLog(accessToken: string, entry: string) {
       const getRes = await drive.files.get({ fileId: fileId!, alt: 'media' }, { responseType: 'stream' });
       currentContent = await new Promise<string>((resolve, reject) => {
         let data = '';
-        // @ts-expect-error
+
         getRes.data.on('data', c => data += c).on('end', () => resolve(data)).on('error', reject);
       });
     }
@@ -211,7 +211,7 @@ export async function listFilesInFolder(accessToken: string, folderName: string)
                 if (f.mimeType === 'application/vnd.google-apps.folder') {
                     // It's a subfolder (Topic)
                     // Push to queue with updated path
-                    const newPath = current.path ? `${current.path}/${f.name}` : f.name;
+                    const newPath = current.path ? `${current.path}/${f.name!}` : f.name!;
                     queue.push({ id: f.id!, path: newPath });
                 } else {
                     // It's a file
