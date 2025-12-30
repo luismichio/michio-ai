@@ -139,6 +139,15 @@ Because Mich.io uses a **BYO (Bring Your Own)** architecture, your overhead is r
 
 ## 📜 Development Changelog
 
+See [CHANGELOG.md](./CHANGELOG.md) for full history.
+
+### v0.2.0 - User Customization & Gemini Integration (Dec 2025)
+*   **Gemini AI Support**: Added Google Gemini as a fallback and alternative AI provider.
+*   **Settings UI**: New configuration page for managing Identity (Name, Tone) and AI Providers.
+*   **Conversational Onboarding**: New users are greeted by Michio and can set their preferences via natural language.
+*   **Tool Calling**: Implemented basic tool execution for Gemini (e.g., updating settings via chat).
+*   **Architecture**: Refactored `AIManager` to support multiple providers and fallback logic.
+
 ### v0.7.0 - The "Agentic" Upgrade (Dec 2025)
 *   **AI Agency**:
     *   **File Creation & Editing**: Michio can now create, edit, and organize notes directly via chat (e.g., "Create a shopping list folder").

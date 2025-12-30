@@ -1,5 +1,6 @@
 'use client';
 import { useSession, signIn, signOut } from "next-auth/react";
+import Link from 'next/link';
 import { useState, useRef, useEffect } from "react";
 import GuestJournal from './components/GuestJournal';
 import styles from './page.module.css';
@@ -7,6 +8,7 @@ import CalendarView from './components/CalendarView';
 
 // ... imports
 import { LocalStorageProvider } from '@/lib/storage/local';
+import { settingsManager } from '@/lib/settings';
 import { useSync } from '@/hooks/useSync';
 import AddSourceModal from './components/AddSourceModal';
 import FileExplorer from './components/FileExplorer';
@@ -127,6 +129,15 @@ export default function Home() {
                     }
                 } else {
                     setMessages([]);
+                    // Onboarding Check (Only if no history today and we are seemingly new)
+                    const config = await settingsManager.getConfig();
+                    if (config.identity.name === 'Traveler') {
+                         setMessages([{
+                             role: 'michio',
+                             content: "Hello! I am Michio, your personal cognitive partner. We haven't been properly introduced yet. What should I call you?",
+                             timestamp: new Date().toLocaleTimeString()
+                         }]);
+                    }
                 }
             } catch (err) {
                 console.error("Failed to load history", err);
@@ -179,12 +190,15 @@ export default function Home() {
         const fullContext = `${knowledgeContext}\n\n--- Current Conversation History (Last 6h) ---\n${localHistory}`;
 
         // 3. Call AI (Stateless - just compute)
+        const config = await settingsManager.getConfig();
+        
         const res = await fetch("/api/chat", {
             method: "POST",
             body: JSON.stringify({ 
                 message: userMsg,
                 history: messages.slice(-10).map(m => ({ role: m.role, content: m.content })), // Send simplified history
-                context: fullContext
+                context: fullContext,
+                config
             }), 
             headers: { "Content-Type": "application/json" },
         });
@@ -251,43 +265,73 @@ export default function Home() {
                      }
                  }
 
-                 if (tool.function.name === 'create_file') {
+             if (tool.function.name === 'create_file') {
+                 try {
+                     const args = JSON.parse(tool.function.arguments);
+                     let content = args.content;
+
+                     // Auto-Summarize
                      try {
-                         const args = JSON.parse(tool.function.arguments);
-                         let content = args.content;
-
-                         // Auto-Summarize
-                         try {
-                             const res = await fetch('/api/ai/summarize', {
-                                 method: 'POST',
-                                 body: JSON.stringify({ content: content }),
-                                 headers: { 'Content-Type': 'application/json' }
-                             });
-                             const data = await res.json();
-                             if (data.summary) {
-                                 content = `> **Summary**: ${data.summary}\n\n---\n\n${content}`;
-                             }
-                         } catch (err) {
-                             console.error("Tool Summary Failed", err);
+                         const res = await fetch('/api/ai/summarize', {
+                             method: 'POST',
+                             body: JSON.stringify({ content: content }),
+                             headers: { 'Content-Type': 'application/json' }
+                         });
+                         const data = await res.json();
+                         if (data.summary) {
+                             content = `> **Summary**: ${data.summary}\n\n---\n\n${content}`;
                          }
-
-                         await storage.saveFile(args.filePath, content);
-                         
-                         const confirmMsg = `I've created *${args.filePath}* with the generated content (and summary).`;
-                         
-                         setMessages(prev => [...prev, { 
-                            role: 'michio', 
-                            content: confirmMsg, 
-                            timestamp: respTimestamp,
-                            usage: usageData ? { total_tokens: usageData.completion_tokens } : undefined
-                        }]);
-
-                        await storage.appendFile(`history/${currentDate}.md`, `**Michio**: ${confirmMsg}\n`);
-                     } catch (e: any) {
-                         console.error("Tool Exec Error", e);
-                         setMessages(prev => [...prev, { role: 'michio', content: `Failed to create file: ${e.message}`, timestamp: respTimestamp }]);
+                     } catch (err) {
+                         console.error("Tool Summary Failed", err);
                      }
+
+                     await storage.saveFile(args.filePath, content);
+                     
+                     const confirmMsg = `I've created *${args.filePath}* with the generated content (and summary).`;
+                     
+                     setMessages(prev => [...prev, { 
+                        role: 'michio', 
+                        content: confirmMsg, 
+                        timestamp: respTimestamp,
+                        usage: usageData ? { total_tokens: usageData.completion_tokens } : undefined
+                    }]);
+
+                    await storage.appendFile(`history/${currentDate}.md`, `**Michio**: ${confirmMsg}\n`);
+                 } catch (e: any) {
+                     console.error("Tool Exec Error", e);
+                     setMessages(prev => [...prev, { role: 'michio', content: `Failed to create file: ${e.message}`, timestamp: respTimestamp }]);
                  }
+             }
+
+             if (tool.function.name === 'update_user_settings') {
+                try {
+                    const args = JSON.parse(tool.function.arguments);
+                    const { name, tone } = args;
+                    const currentConfig = await settingsManager.getConfig();
+                    const newIdentity = { ...currentConfig.identity };
+                    
+                    if (name) newIdentity.name = name;
+                    if (tone) newIdentity.tone = tone;
+    
+                    await settingsManager.saveConfig({
+                        ...currentConfig,
+                        identity: newIdentity
+                    });
+                    
+                    const updateMsg = `Settings updated. I will call you **${newIdentity.name}** and speak in a **${newIdentity.tone}** tone.`;
+                    
+                    setMessages(prev => [...prev, { 
+                        role: 'michio', 
+                        content: updateMsg, 
+                        timestamp: respTimestamp,
+                        usage: usageData ? { total_tokens: usageData.completion_tokens } : undefined
+                    }]);
+                    await storage.appendFile(`history/${currentDate}.md`, `**Michio**: ${updateMsg}\n`);
+
+                } catch (e: any) {
+                     console.error("Tool Settings Error", e);
+                }
+             }
              }
              // For now, we stop here. In a real agent loop, we'd feed the result back to AI.
              // But for "Edit this file", a confirmation is enough.
@@ -401,6 +445,21 @@ export default function Home() {
                 <span>{currentDate}</span>
                 <span style={{ fontSize: '0.8rem', opacity: 0.6 }}>▼</span>
              </button>
+
+             <Link href="/settings">
+                <button 
+                    style={{
+                        fontSize: '1.2rem', 
+                        background: 'transparent', 
+                        border: 'none', 
+                        cursor: 'pointer',
+                        opacity: 0.7
+                    }}
+                    title="Settings"
+                >
+                    ⚙️
+                </button>
+             </Link>
              <button 
                 onClick={() => setIsSourceModalOpen(true)}
                 style={{
@@ -454,20 +513,11 @@ export default function Home() {
                         }} />
                         {syncError ? 'Error' : (isSyncing ? (syncMessage || 'Syncing...') : 'Online')}
                     </div>
-
-                    <button 
-                        onClick={() => signOut()} 
-                        style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer', fontSize: '0.8rem', textDecoration: 'underline' }}
-                    >
-                        Disconnect
-                    </button>
-                    
-                    {syncError && (
-                        <button onClick={() => alert(syncError)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1rem' }}>⚠️</button>
-                    )}
                 </div>
              ) : (
-                 <button onClick={() => signIn("google")} className={styles.authBtn}>Enable Sync</button>
+                <div style={{ fontSize: '0.8rem', color: '#888' }}>
+                    
+                </div>
              )}
         </div>
       </header>
