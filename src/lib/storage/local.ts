@@ -139,6 +139,79 @@ export class LocalStorageProvider implements StorageProvider {
         this.indexFile(virtualPath, finalContent);
     }
 
+    async getRecentLogs(limitHours: number): Promise<string> {
+        const now = new Date();
+        const startTime = new Date(now.getTime() - limitHours * 60 * 60 * 1000);
+        
+        // Get Dates for Today and Yesterday (using local time logic implicitly via Date)
+        const todayDate = new Date();
+        const yesterdayDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+        const todayStr = this.formatDate(todayDate);
+        const yesterdayStr = this.formatDate(yesterdayDate);
+        
+        let logs = "";
+
+        // 1. If window crosses midnight (start time is yesterday), read yesterday's log first
+        if (startTime.getDate() !== now.getDate()) {
+            const yesterdayContent = await this.readFile(`history/${yesterdayStr}.md`);
+            if (typeof yesterdayContent === 'string') {
+                logs += this.filterLogByTime(yesterdayContent, startTime, yesterdayDate) + "\n";
+            }
+        }
+
+        // 2. Read Today's log
+        const todayContent = await this.readFile(`history/${todayStr}.md`);
+        if (typeof todayContent === 'string') {
+            logs += this.filterLogByTime(todayContent, startTime, todayDate);
+        }
+
+        return logs || "No recent history.";
+    }
+
+    private formatDate(date: Date): string {
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    }
+
+    private filterLogByTime(content: string, startTime: Date, fileDate: Date): string {
+        const blocks = content.split('###');
+        let result = "";
+
+        for (const block of blocks) {
+            if (!block.trim()) continue;
+
+            // Extract Time: " 10:30:05 PM\n**User**..."
+            const timeMatch = block.match(/^\s*(\d{1,2}:\d{2}:\d{2}\s?(?:AM|PM)?)/i);
+            if (timeMatch) {
+                const timeStr = timeMatch[1];
+                
+                // Parse Time
+                const entryDate = new Date(fileDate);
+                const [time, modifier] = timeStr.trim().split(' ');
+                let [hours, minutes, seconds] = time.split(':').map(Number);
+                
+                if (modifier) {
+                    if (modifier.toUpperCase() === 'PM' && hours < 12) hours += 12;
+                    if (modifier.toUpperCase() === 'AM' && hours === 12) hours = 0;
+                }
+                
+                entryDate.setHours(hours, minutes, seconds);
+
+                if (entryDate >= startTime) {
+                    result += '###' + block; 
+                }
+            } else {
+                // Include blocks without timestamp (e.g. continuations or system headers)
+                // if they are part of the file we typically assume they are relevant if the file is relevant.
+                // But for safety in a rolling window, maybe we skip if we can't date it?
+                // Actually, 'Added Source' logs might be system logs with timestamps.
+                // If it HAS NO timestamp, it might be garbage or noise. Let's keep it to be safe.
+                result += '###' + block;
+            }
+        }
+        return result;
+    }
+
     async renameFile(oldPath: string, newPath: string): Promise<void> {
         await this.ensureParent(newPath);
 

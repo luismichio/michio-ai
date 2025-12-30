@@ -46,7 +46,7 @@ export const POST = auth(async function POST(req) {
 
 
     // 2. Chat with Groq (Pass history)
-    const response = await chatWithMichio(message, context, messageHistory);
+    const { content: responseText, usage } = await chatWithMichio(message, context, messageHistory);
 
     // 3. Log to History
     // DEPRECATED: Client now handles logging + SyncEngine uploads.
@@ -54,7 +54,7 @@ export const POST = auth(async function POST(req) {
     // const logEntry = `### ${new Date().toLocaleTimeString()}\n**User**: ${message}\n**Michio**: ${response}\n`;
     // if (req.auth) ...
 
-    return NextResponse.json({ response });
+    return NextResponse.json({ response: responseText, usage });
 
   } catch (error) {
     console.error("Chat error:", error);

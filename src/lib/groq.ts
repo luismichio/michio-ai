@@ -54,7 +54,10 @@ export async function chatWithMichio(userPrompt: string, context: string, histor
             stop: null
         });
 
-        return chatCompletion.choices[0]?.message?.content || "Michio is silent.";
+        const content = chatCompletion.choices[0]?.message?.content || "Michio is silent.";
+        const usage = chatCompletion.usage; 
+
+        return { content, usage };
     } catch (error: any) {
         console.error("Groq Error:", error);
         throw new Error(`Groq API Error: ${error.message}`);

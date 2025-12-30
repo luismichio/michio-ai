@@ -139,6 +139,14 @@ Because Mich.io uses a **BYO (Bring Your Own)** architecture, your overhead is r
 
 ## 📜 Development Changelog
 
+### v0.6.0 - The "Rolling Context" (Dec 2025)
+*   **Rolling Window Context**: Replaced the static "Daily Log" context with a valid dynamic "6-Hour Rolling Window". This ensures Michio remembers conversations across midnight and keeps the context window efficient.
+*   **Context Transparency**: Added real-time Token Counters (Session Total & Per-Message) to help users track AI usage and cost.
+*   **UX Polish**:
+    *   **Auto-Expanding Chat**: The input box now grows with your text (like a modern messenger).
+    *   **Timestamps**: Every message now displays its precise timestamp.
+    *   **Load More**: Chat history renders efficiently, loading only recent messages with a button to fetch older ones.
+
 ### v0.5.0 - The "Stabilization" Update (Dec 2025)
 *   **Local RAG Stabilization**: Switched from `@huggingface/transformers` to **TensorFlow.js** + Universal Sentence Encoder.
     *   *Why?* The Transformers.js library (WASM) caused persistent initialization crashes in the Next.js 16 / Turbopack environment, specifically within Web Workers. TensorFlow.js provides native JS/WebGL support, ensuring vastly superior stability and build reliability while maintaining 75% token reduction efficiency.

@@ -15,7 +15,14 @@ import SourceViewer from './components/SourceViewer';
 export default function Home() {
   const { data: session, update } = useSession();
   const [chatInput, setChatInput] = useState("");
-  const [messages, setMessages] = useState<{role: 'user' | 'michio', content: string}[]>([]);
+  // Messages now hold more metadata
+  const [messages, setMessages] = useState<{
+      role: 'user' | 'michio', 
+      content: string, 
+      timestamp?: string, 
+      usage?: { total_tokens: number }
+  }[]>([]);
+  
   const [isChatting, setIsChatting] = useState(false);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   // Fix Hydration Error: Initialize empty, set on mount
@@ -27,6 +34,11 @@ export default function Home() {
   const [viewingSource, setViewingSource] = useState<{title: string, content: string} | null>(null);
   const streamRef = useRef<HTMLDivElement>(null);
   const hasScrolledRef = useRef(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // New State for Rolling Window
+  const [historyLimit, setHistoryLimit] = useState(20); // Initial load limit
+  const [sessionUsage, setSessionUsage] = useState({ input: 0, output: 0, total: 0 });
   
   // Storage Provider
   const [storage] = useState(() => new LocalStorageProvider());
@@ -64,6 +76,15 @@ export default function Home() {
       hasScrolledRef.current = false;
   }, [currentDate]);
 
+  // Auto-resize textarea
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
+    }
+  }, [chatInput]);
+
   // Load history (Run once on mount/date change - then Sync keeps it updated)
   useEffect(() => {
     async function load() {
@@ -76,8 +97,11 @@ export default function Home() {
 
                 if (content && typeof content === 'string' && !content.startsWith("No journal")) {
                     const parsed = parseLogToMessages(content);
-                    setMessages(parsed);
-                    if (parsed.length > 0 && !hasScrolledRef.current) {
+                    // Slice for "Load More" functionality (show last N)
+                    const visibleMessages = parsed.slice(-historyLimit);
+                    setMessages(visibleMessages);
+                    
+                    if (visibleMessages.length > 0 && !hasScrolledRef.current) {
                         scrollToBottom();
                         hasScrolledRef.current = true;
                     }
@@ -92,7 +116,7 @@ export default function Home() {
         }
     }
     load();
-  }, [currentDate, storage]); // Removed 'session' dependency - strictly local load
+  }, [currentDate, storage, historyLimit]); // Added historyLimit dependency
 
   async function handleChat(e: React.FormEvent) {
     e.preventDefault();
@@ -105,23 +129,41 @@ export default function Home() {
     scrollToBottom();
     
     try {
-        // 1. Save User Message Locally
         const timestamp = new Date().toLocaleTimeString();
+        
+        // 1. Save User Message Locally
         const logEntry = `### ${timestamp}\n**User**: ${userMsg}\n`;
         await storage.appendFile(`history/${currentDate}.md`, logEntry);
         
-        // 2. Read Context (Local History + Knowledge Base)
-        const localHistory = await storage.readFile(`history/${currentDate}.md`) || "";
+        // Update local state immediately with estimate
+        const estimatedTokens = Math.ceil(userMsg.length / 4);
+        setMessages(prev => {
+            const newArr = [...prev];
+            // Update the last user message with timestamp/estimate
+            const lastIdx = newArr.length - 1;
+            if (newArr[lastIdx]) {
+                newArr[lastIdx] = { 
+                    ...newArr[lastIdx], 
+                    timestamp, 
+                    usage: { total_tokens: estimatedTokens } 
+                };
+            }
+            return newArr;
+        });
+
+        // 2. Read Context (Rolling Window 6h + Knowledge Base)
+        // We use the new getRecentLogs method
+        const localHistory = await storage.getRecentLogs(6); 
         const knowledgeContext = await storage.getKnowledgeContext(userMsg);
         
-        const fullContext = `${knowledgeContext}\n\n--- Current Conversation History ---\n${localHistory}`;
+        const fullContext = `${knowledgeContext}\n\n--- Current Conversation History (Last 6h) ---\n${localHistory}`;
 
         // 3. Call AI (Stateless - just compute)
         const res = await fetch("/api/chat", {
             method: "POST",
             body: JSON.stringify({ 
                 message: userMsg,
-                history: messages.slice(-10),
+                history: messages.slice(-10).map(m => ({ role: m.role, content: m.content })), // Send simplified history
                 context: fullContext
             }), 
             headers: { "Content-Type": "application/json" },
@@ -131,8 +173,24 @@ export default function Home() {
         if (!res.ok) throw new Error(data.message || "Unknown error");
         
         const responseText = data.response;
+        const usageData = data.usage; // { prompt_tokens, completion_tokens, total_tokens }
 
-        setMessages(prev => [...prev, { role: 'michio', content: responseText }]);
+        // Update Session Stats
+        if (usageData) {
+            setSessionUsage(prev => ({
+                input: prev.input + (usageData.prompt_tokens || 0),
+                output: prev.output + (usageData.completion_tokens || 0),
+                total: prev.total + (usageData.total_tokens || 0)
+            }));
+        }
+
+        const respTimestamp = new Date().toLocaleTimeString();
+        setMessages(prev => [...prev, { 
+            role: 'michio', 
+            content: responseText, 
+            timestamp: respTimestamp,
+            usage: usageData ? { total_tokens: usageData.completion_tokens } : undefined
+        }]);
         
         // 4. Save Michio Response Locally
         const michioEntry = `**Michio**: ${responseText}\n`;
@@ -185,13 +243,41 @@ export default function Home() {
 
   function parseLogToMessages(log: string) {
     if (!log) return [];
-    const chunks = log.split('###').filter(c => c.trim());
-    const msgs: {role: 'user' | 'michio', content: string}[] = [];
+    
+    // Split by '### ' which denotes a new entry with timestamp
+    // Format: "### 10:30:00 PM\n**User**: hello..."
+    const chunks = log.split('### ').filter(c => c.trim());
+    
+    const msgs: {
+        role: 'user' | 'michio', 
+        content: string, 
+        timestamp?: string,
+        usage?: { total_tokens: number }
+    }[] = [];
+
     chunks.forEach(chunk => {
-      const userMatch = chunk.match(/\*\*User\*\*: ([\s\S]*?)(?=\n\*\*Michio\*\*|$)/);
-      const michioMatch = chunk.match(/\*\*Michio\*\*: ([\s\S]*)/);
-      if (userMatch && userMatch[1]) msgs.push({ role: 'user', content: userMatch[1].trim() });
-      if (michioMatch && michioMatch[1]) msgs.push({ role: 'michio', content: michioMatch[1].trim() });
+      // Extract first line (timestamp)
+      const lines = chunk.split('\n');
+      const timestamp = lines[0]?.trim(); // "10:30:00 PM"
+      const body = lines.slice(1).join('\n'); // Rest of message
+      
+      const userMatch = body.match(/\*\*User\*\*: ([\s\S]*?)(?=\n\*\*Michio\*\*|$)/);
+      const michioMatch = body.match(/\*\*Michio\*\*: ([\s\S]*)/);
+      
+      if (userMatch && userMatch[1]) {
+          msgs.push({ 
+              role: 'user', 
+              content: userMatch[1].trim(),
+              timestamp 
+          });
+      }
+      if (michioMatch && michioMatch[1]) {
+          msgs.push({ 
+              role: 'michio', 
+              content: michioMatch[1].trim(),
+              timestamp 
+          });
+      }
     });
     return msgs;
   }
@@ -239,7 +325,12 @@ export default function Home() {
         
         <div className={styles.authBadge}>
              {session ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
+                    {/* Session Usage Counter */}
+                    <div style={{ fontSize: '0.75rem', color: '#666', border: '1px solid #ddd', padding: '2px 6px', borderRadius: 4 }}>
+                        ∑ Tokens: {sessionUsage.total}
+                    </div>
+
                     {/* Sync Status Indicator */}
                     <div style={{ 
                         fontSize: '0.8rem', 
@@ -288,10 +379,40 @@ export default function Home() {
                     </div>
                 )}
                 
+                {/* Load More Button */}
+                {messages.length >= historyLimit && (
+                    <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
+                        <button 
+                            onClick={() => setHistoryLimit(prev => prev + 20)}
+                            style={{ 
+                                background: '#f3f4f6', border: 'none', padding: '0.5rem 1rem', 
+                                borderRadius: 20, fontSize: '0.8rem', cursor: 'pointer', color: '#666'
+                            }}
+                        >
+                            Load Older Messages
+                        </button>
+                    </div>
+                )}
+                
                 {messages.map((msg, i) => (
                     <div key={i} className={`${styles.message} ${msg.role === 'user' ? styles.userMessage : styles.michioMessage}`}>
-                        {msg.role === 'michio' && <strong style={{display:'block', marginBottom: 4, fontSize: '0.8rem', opacity: 0.5}}>Michio</strong>}
+                        <div style={{ 
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            marginBottom: 4, fontSize: '0.75rem', opacity: 0.6 
+                        }}>
+                             <strong>{msg.role === 'michio' ? 'Michio' : 'You'}</strong>
+                             <span>{msg.timestamp}</span>
+                        </div>
+                        
                         <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                        
+                        {msg.usage && (
+                            <div style={{ 
+                                fontSize: '0.65rem', opacity: 0.4, textAlign: 'right', marginTop: 4 
+                            }}>
+                                {msg.usage.total_tokens} tok
+                            </div>
+                        )}
                     </div>
                 ))}
                 
@@ -310,12 +431,19 @@ export default function Home() {
       {/* 3. Fixed Input Area */}
       <div className={styles.inputArea}>
         <form onSubmit={handleChat} className={styles.inputWrapper}>
-            <input 
-                type="text" 
+            <textarea 
+                ref={textareaRef}
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleChat(e as any);
+                  }
+                }}
                 placeholder="Message Michio..."
                 className={styles.chatInput}
+                rows={1}
             />
             <button type="submit" disabled={isChatting} className={styles.sendBtn}>
                 {isChatting ? (
