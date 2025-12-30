@@ -135,3 +135,20 @@ Because Mich.io uses a **BYO (Bring Your Own)** architecture, your overhead is r
 | **Storage Cost** | High (You host the data). | **Zero** (Stored in User's Drive/Notion). |
 | **User Lifetime Value** | Low (Thin margins). | **High** (Pure profit on the software license). |
 
+---
+
+## 📜 Development Changelog
+
+### v0.5.0 - The "Stabilization" Update (Dec 2025)
+*   **Local RAG Stabilization**: Switched from `@huggingface/transformers` to **TensorFlow.js** + Universal Sentence Encoder.
+    *   *Why?* The Transformers.js library (WASM) caused persistent initialization crashes in the Next.js 16 / Turbopack environment, specifically within Web Workers. TensorFlow.js provides native JS/WebGL support, ensuring vastly superior stability and build reliability while maintaining 75% token reduction efficiency.
+*   **Authentication & Sync**: Fixed critical "Split Brain" issues where local and cloud states would diverge. Implemented ID-based sync logic to robustly handle folder moves and renames.
+*   **Offline-First**: Re-architected storage to use Dexie.js (IndexedDB) as the source of truth, treating Google Drive purely as a backup/sync target.
+*   **UI Enhancements**: Added File Explorer (Drag & Drop), Journey Map (Calendar), and PDF Parsing.
+
+### v0.1.0 - The "Genesis" (Dec 2025)
+*   **Core Setup**: Initialized Next.js 16 app with "Man on a Journey" theme.
+*   **Guest Mode**: Implemented local-only usage for privacy.
+*   **Cloud Integration**: Added Google Drive scope via NextAuth for optional cloud sync.
+*   **AI Integration**: Connected Groq (Llama 3) for the conversational "Wisdom" layer.
+
