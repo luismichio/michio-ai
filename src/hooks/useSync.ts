@@ -23,11 +23,18 @@ export function useSync(storage: StorageProvider, session: any, updateSession: (
     useEffect(() => {
         if (session?.accessToken) {
             const client = new GoogleDriveClient(session.accessToken);
-            engineRef.current = new SyncEngine(client);
+            engineRef.current = new SyncEngine(client, storage);
+            // Register with storage for manual triggering
+            if ('setSyncEngine' in storage) {
+                (storage as any).setSyncEngine(engineRef.current);
+            }
         } else {
             engineRef.current = null;
+            if ('setSyncEngine' in storage) {
+                (storage as any).setSyncEngine(null);
+            }
         }
-    }, [session?.accessToken]);
+    }, [session?.accessToken, storage]);
 
     const syncNow = useCallback(async () => {
          if (!engineRef.current) return;

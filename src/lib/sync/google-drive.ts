@@ -114,19 +114,7 @@ export class GoogleDriveClient {
     /**
      * Update file content
      */
-    async updateFile(fileId: string, content: string) {
-        const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
-            method: 'PATCH',
-            headers: {
-                'Authorization': `Bearer ${this.accessToken}`,
-                'Content-Type': 'text/plain', // Assumption: Text only for now
-            },
-            body: content
-        });
-        
-        if (!res.ok) throw new Error("Update failed");
-        return await res.json();
-    }
+
 
     async updateMetadata(fileId: string, metadata: { name?: string, addParents?: string[], removeParents?: string[] }) {
         const url = new URL(`https://www.googleapis.com/drive/v3/files/${fileId}`);
@@ -144,19 +132,49 @@ export class GoogleDriveClient {
         return await res.json();
     }
 
+    async updateFile(fileId: string, content: string | Blob | ArrayBuffer) {
+        // Simple upload (media only) is easiest for updates, but multipart is robust.
+        // For updates, we often just want to update content.
+        // Google Drive API supports PATCHing content.
+        // Ref: https://developers.google.com/drive/api/guides/manage-uploads#simple
+        
+        const blob = content instanceof Blob ? content : new Blob([content]);
+        
+        const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+            method: 'PATCH',
+            headers: {
+                'Authorization': `Bearer ${this.accessToken}`,
+                'Content-Type': blob.type || 'application/octet-stream'
+            },
+            body: blob
+        });
+
+        if (!res.ok) throw new Error("Update content failed");
+        return await res.json();
+    }
+
     /**
      * Create file
      */
-    async createFile(name: string, folderId: string | null, content: string) {
+    async createFile(name: string, folderId: string | null, content: string | Blob | ArrayBuffer) {
+        let mimeType = 'application/octet-stream';
+        if (name.endsWith('.md')) mimeType = 'text/markdown';
+        else if (name.endsWith('.txt')) mimeType = 'text/plain';
+        else if (name.endsWith('.pdf')) mimeType = 'application/pdf';
+
+        const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
+
         const metadata = {
             name,
             parents: folderId ? [folderId] : [],
-            mimeType: 'text/plain' // Assumption
+            // mimeType: mimeType // Don't set folder mimeType here obviously, but file mimeType is inferred from content usually? 
+            // Actually for files, we don't strictly need to set it in metadata if we set it in upload body?
+            // But good practice.
         };
 
         const form = new FormData();
         form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-        form.append('file', new Blob([content], { type: 'text/plain' }));
+        form.append('file', blob);
 
         const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
             method: 'POST',

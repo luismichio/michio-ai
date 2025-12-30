@@ -10,6 +10,7 @@ import { LocalStorageProvider } from '@/lib/storage/local';
 import { useSync } from '@/hooks/useSync';
 import AddSourceModal from './components/AddSourceModal';
 import FileExplorer from './components/FileExplorer';
+import SourceViewer from './components/SourceViewer';
 
 export default function Home() {
   const { data: session, update } = useSession();
@@ -23,6 +24,7 @@ export default function Home() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
   const [isExplorerOpen, setIsExplorerOpen] = useState(false);
+  const [viewingSource, setViewingSource] = useState<{title: string, content: string} | null>(null);
   const streamRef = useRef<HTMLDivElement>(null);
   const hasScrolledRef = useRef(false);
   
@@ -72,7 +74,7 @@ export default function Home() {
                 await storage.init();
                 const content = await storage.readFile(`history/${currentDate}.md`) || "";
 
-                if (content && !content.startsWith("No journal")) {
+                if (content && typeof content === 'string' && !content.startsWith("No journal")) {
                     const parsed = parseLogToMessages(content);
                     setMessages(parsed);
                     if (parsed.length > 0 && !hasScrolledRef.current) {
@@ -110,7 +112,7 @@ export default function Home() {
         
         // 2. Read Context (Local History + Knowledge Base)
         const localHistory = await storage.readFile(`history/${currentDate}.md`) || "";
-        const knowledgeContext = await storage.getKnowledgeContext();
+        const knowledgeContext = await storage.getKnowledgeContext(userMsg);
         
         const fullContext = `${knowledgeContext}\n\n--- Current Conversation History ---\n${localHistory}`;
 
@@ -141,7 +143,8 @@ export default function Home() {
 
         scrollToBottom();
     } catch (err: any) {
-      setMessages(prev => [...prev, { role: 'michio', content: `(Entry saved. Offline mode: AI unavailable)` }]);
+      console.error("Chat Error:", err);
+      setMessages(prev => [...prev, { role: 'michio', content: `(Entry saved. Offline mode: AI unavailable. Reason: ${err.message || 'Unknown'})` }]);
       scrollToBottom();
     } finally {
       setIsChatting(false);
@@ -151,6 +154,24 @@ export default function Home() {
   const handleDateSelect = (date: string) => {
       setCurrentDate(date);
       setIsCalendarOpen(false);
+  };
+
+  const handleOpenFile = async (path: string) => {
+      try {
+          const content = await storage.readFile(path);
+          if (content && typeof content === 'string') {
+              setViewingSource({ 
+                  title: path.split('/').pop() || path, 
+                  content 
+              });
+              setIsExplorerOpen(false); // Close Explorer if open
+          } else {
+              alert("Failed to read file content.");
+          }
+      } catch (e) {
+          console.error("Read Error", e);
+          alert("Error reading file.");
+      }
   };
 
   // Helper to scroll to bottom
@@ -323,13 +344,16 @@ export default function Home() {
       )}
 
       {isExplorerOpen && (
-          <FileExplorer 
-              storage={storage} 
-              onClose={() => setIsExplorerOpen(false)} 
-              syncLogs={syncLogs}
-          />
+        <FileExplorer storage={storage} onClose={() => setIsExplorerOpen(false)} syncLogs={syncLogs} onOpenFile={handleOpenFile} />
       )}
 
+      {viewingSource && (
+        <SourceViewer 
+            title={viewingSource.title} 
+            content={viewingSource.content} 
+            onClose={() => setViewingSource(null)} 
+        />
+      )}
     </main>
   );
 }

@@ -2,10 +2,10 @@ import Dexie, { Table } from 'dexie';
 
 export interface FileRecord {
     path: string; // Primary Key
-    content: string;
+    content: string | Blob | ArrayBuffer;
     updatedAt: number;
     remoteId?: string; // Google Drive ID (Indexed)
-    type: 'file' | 'folder';
+    type: 'file' | 'folder' | 'source';
     dirty?: number; // 1 if dirty, 0 or undefined if clean (Indexed for fast lookup)
     deleted?: number; // 1 if deleted
 }
@@ -15,9 +15,17 @@ export interface SettingRecord {
     value: any;
 }
 
+export interface FileChunk {
+    id?: number;
+    filePath: string;
+    content: string;
+    embedding: number[]; // 512 dimensions (TensorFlow.js Universal Sentence Encoder)
+}
+
 export class MichioDB extends Dexie {
     files!: Table<FileRecord>;
     settings!: Table<SettingRecord>;
+    chunks!: Table<FileChunk>;
 
     constructor() {
         super('michio-db');
@@ -38,6 +46,11 @@ export class MichioDB extends Dexie {
                 file.dirty = 0;
                 file.deleted = 0;
             });
+        });
+
+        // Add semantic chunks table in version 4
+        this.version(4).stores({
+            chunks: '++id, filePath'
         });
     }
 }

@@ -10,10 +10,11 @@ interface FileExplorerProps {
     storage: StorageProvider;
     onClose: () => void;
     syncLogs?: string[];
+    onOpenFile?: (path: string) => void;
 }
 
 export default function FileExplorer(props: FileExplorerProps) {
-    const { storage, onClose } = props;
+    const { storage, onClose, onOpenFile } = props;
     const [currentPath, setCurrentPath] = useState('misc');
     
     // Actions State
@@ -23,6 +24,10 @@ export default function FileExplorer(props: FileExplorerProps) {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [isBulkMode, setIsBulkMode] = useState(false);
     const lastInteractionIndex = useRef<number>(-1);
+
+    // Dialog State
+    type DialogAction = { type: 'rename', file: FileMeta, value: string } | { type: 'delete', file: FileMeta };
+    const [dialogAction, setDialogAction] = useState<DialogAction | null>(null);
 
     // Initial Migration Trigger
     useEffect(() => {
@@ -74,6 +79,35 @@ export default function FileExplorer(props: FileExplorerProps) {
             }
         });
 
+
+
+        // NotebookLM Style: Group "Source" files
+        // If we have "foo.pdf" and "foo.pdf.source.md", hide "foo.pdf" and rename "foo.pdf.source.md" to "foo.pdf (Source)"
+        
+        // 1. Find all sources
+        const sources = currentLevelFiles.filter(f => f.name.endsWith('.source.md'));
+        const sourceMap = new Set(sources.map(s => s.name));
+
+        // 2. Filter out raw PDFs if they have a source
+        const finalFiles = currentLevelFiles.filter(f => {
+             const isSource = f.name.endsWith('.source.md');
+             if (isSource) return true;
+
+             const potentialSourceName = f.name + '.source.md';
+             if (sourceMap.has(potentialSourceName)) return false; // Hide raw PDF
+             
+             return true;
+        }).map(f => {
+            if (f.name.endsWith('.source.md')) {
+                return {
+                    ...f,
+                    name: f.name.replace('.pdf.source.md', ' (Source)'), // Nice display name
+                    type: 'source' as const // New visual type?
+                };
+            }
+            return f;
+        });
+
         const folderItems: FileMeta[] = Array.from(folders)
             .filter(name => !currentLevelFiles.some(f => f.name === name && f.type === 'folder'))
             .map(name => ({
@@ -81,10 +115,10 @@ export default function FileExplorer(props: FileExplorerProps) {
                 name: name,
                 path: isRoot ? name : `${currentPath}/${name}`,
                 updatedAt: Date.now(),
-                type: 'folder'
+                type: 'folder' as const
             }));
 
-        return [...folderItems, ...currentLevelFiles].sort((a, b) => {
+        return [...folderItems, ...finalFiles].sort((a, b) => {
              if (a.type === b.type) return a.name.localeCompare(b.name);
              return a.type === 'folder' ? -1 : 1;
         });
@@ -129,19 +163,34 @@ export default function FileExplorer(props: FileExplorerProps) {
         } else if (file.type === 'application/pdf') {
              try {
                 const buffer = await file.arrayBuffer();
-                content = await extractTextFromPdf(buffer);
-             } catch (err) {
-                alert("Failed to extract text from PDF");
-                return;
+                // Clone buffer for extraction so original isn't detached
+                const extractedText = await extractTextFromPdf(buffer.slice(0));
+                
+                // 1. Create Shadow Source
+                const sourcePath = `${path}.source.md`;
+                const sourceContent = `## Source: ${file.name}\n\n${extractedText}`;
+                
+                await storage.saveFile(sourcePath, sourceContent);
+                
+                // 2. Save "Raw" PDF Binary (Local-First)
+                // Now that storage supports binary, we save the full PDF.
+                await storage.saveFile(path, buffer);
+                
+                return; // Done
+             } catch (e) {
+                 console.error("PDF Upload Trace", e);
+                 alert("Failed to parse PDF");
+                 return;
              }
         } else {
-             alert("Only text/md/pdf files supported currently!");
+             alert("Only text/markdown/pdf files supported");
              return;
         }
 
+        // Standard Text Save
         await storage.saveFile(path, content);
-        // loadFiles(); // Removed: Reactive
-    };
+    };    // loadFiles(); // Removed: Reactive
+    
 
     // Bulk Delete
     const handleBulkDelete = async () => {
@@ -157,9 +206,21 @@ export default function FileExplorer(props: FileExplorerProps) {
         setSelectedIds(new Set()); // Clear selection
     };
 
-    const handleDelete = async (file: FileMeta) => {
-        if (!confirm(`Delete ${file.name}?`)) return;
-        await performDelete(file);
+    const handleDeleteClick = (file: FileMeta) => {
+        setDialogAction({ type: 'delete', file });
+    };
+
+    const confirmDelete = async () => {
+        if (!dialogAction || dialogAction.type !== 'delete') return;
+        const file = dialogAction.file;
+        setDialogAction(null); // Close immediately
+
+        try {
+            await performDelete(file);
+        } catch(e: any) {
+            console.error("Delete failed:", e);
+            alert("Delete Error: " + e.message);
+        }
     };
 
     const performDelete = async (file: FileMeta) => {
@@ -168,15 +229,72 @@ export default function FileExplorer(props: FileExplorerProps) {
             for (const f of all) {
                 await storage.deleteFile(f.path);
             }
+        } else if (file.type === 'source') {
+             // Delete Source AND Original PDF
+             await storage.deleteFile(file.path);
+             const originalPath = file.path.replace('.source.md', '');
+             try {
+                 await storage.deleteFile(originalPath);
+             } catch (e) {
+                 console.warn("Could not delete original PDF (might not exist):", e);
+             }
         } else {
             await storage.deleteFile(file.path);
+            // Also check if there's a source for this file (if we deleted the raw PDF manually?)
+            // Usually we hide raw PDF, but if we delete from search results or something.
+            // Safe to check.
+            if (file.path.endsWith('.pdf')) {
+                const sourcePath = `${file.path}.source.md`;
+                await storage.deleteFile(sourcePath); 
+            }
         }
     };
 
-    const handleRename = async (file: FileMeta) => {
-        const newName = prompt("New Name:", file.name);
+    const handleRenameClick = (file: FileMeta) => {
+        setDialogAction({ 
+            type: 'rename', 
+            file, 
+            value: file.type === 'source' ? file.name.replace(' (Source)', '') : file.name 
+        });
+    };
+
+    const confirmRename = async () => {
+        if (!dialogAction || dialogAction.type !== 'rename') return;
+        const { file, value: newName } = dialogAction;
+        setDialogAction(null);
+
         if (!newName || newName === file.name) return;
-        
+
+        // Handle Source Rename
+        if (file.type === 'source') {
+             const oldSourcePath = file.path;
+             const oldPdfPath = oldSourcePath.replace('.source.md', '');
+             const oldPdfName = oldPdfPath.split('/').pop() || '';
+             
+             let newPdfName = newName;
+             if (!newPdfName.endsWith('.pdf')) newPdfName += '.pdf';
+             
+             if (newPdfName === oldPdfName) return;
+             
+             const parentDir = oldPdfPath.substring(0, oldPdfPath.lastIndexOf('/'));
+             const newPdfPath = `${parentDir}/${newPdfName}`;
+             const newSourcePath = `${newPdfPath}.source.md`;
+             
+             try {
+                // Try rename PDF first
+                try {
+                    await storage.renameFile(oldPdfPath, newPdfPath);
+                } catch (err) {
+                    console.warn("Could not rename original PDF (might not exist):", err);
+                }
+                // Always rename Source
+                await storage.renameFile(oldSourcePath, newSourcePath);
+             } catch (e: any) {
+                 alert("Rename failed: " + e.message);
+             }
+             return;
+        }
+
         const oldPath = file.path;
         const parts = oldPath.split('/');
         parts.pop();
@@ -186,6 +304,36 @@ export default function FileExplorer(props: FileExplorerProps) {
             await storage.renameFile(oldPath, newPath);
         } catch (e: any) {
              alert(e.message);
+        }
+    };
+
+    const handleReprocess = async (file: FileMeta) => {
+        if (file.type !== 'source') return;
+        if (!confirm(`Re-process ${file.name}? This will re-extract text from the original PDF.`)) return;
+
+        const originalPath = file.path.replace('.source.md', '');
+        
+        try {
+            // Read the binary from the hidden PDF file
+            const pdfContent = await storage.readFile(originalPath);
+            
+            if (!pdfContent) {
+                 alert("Original PDF not found locally. Please Sync Down from Cloud or Re-upload.");
+                 return;
+            }
+            
+            if (pdfContent instanceof ArrayBuffer) {
+                const extractedText = await extractTextFromPdf(pdfContent);
+                const sourceContent = `## Source: ${file.name.replace(' (Source)', '')}\n\n${extractedText}`;
+                await storage.saveFile(file.path, sourceContent);
+                alert("Re-processing complete!");
+            } else {
+                 alert("Local file is not binary! Cannot re-process.");
+            }
+
+        } catch (e: any) {
+             console.error("Reprocess failed", e);
+             alert("Failed: " + e.message);
         }
     };
 
@@ -402,6 +550,18 @@ export default function FileExplorer(props: FileExplorerProps) {
                     }} style={{ cursor: 'pointer', marginRight: '1rem', color: '#ff4444', border: '1px solid #ff4444', background: 'transparent', borderRadius: 4, padding: '2px 8px' }}>
                         Reset Cloud
                     </button>
+                    {props.syncLogs && (
+                        <button onClick={async () => {
+                            if (storage.forceSync) {
+                                await storage.forceSync();
+                                alert("Sync triggered!");
+                            } else {
+                                alert("Sync not available");
+                            }
+                        }} style={{ cursor: 'pointer', marginRight: '1rem', color: '#0070f3', border: '1px solid #0070f3', background: 'transparent', borderRadius: 4, padding: '2px 8px' }}>
+                            ⟳ Sync Now
+                        </button>
+                    )}
                     <button onClick={handleCreateFolder} style={{ cursor: 'pointer' }}>
                         New Folder
                     </button>
@@ -439,6 +599,44 @@ export default function FileExplorer(props: FileExplorerProps) {
                      })}
                 </div>
 
+                {/* Dialog Overlay */}
+                {dialogAction && (
+                    <div style={{
+                        position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                        background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        zIndex: 1000
+                    }} onClick={(e) => { e.stopPropagation(); setDialogAction(null); }}>
+                        <div style={{ background: 'white', padding: '1.5rem', borderRadius: 8, width: 300 }} onClick={e => e.stopPropagation()}>
+                            {dialogAction.type === 'delete' && (
+                                <>
+                                    <h3 style={{ margin: '0 0 1rem 0' }}>Confirm Delete</h3>
+                                    <p style={{ marginBottom: '1.5rem' }}>Delete <b>{dialogAction.file.name}</b>?</p>
+                                    <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+                                        <button onClick={() => setDialogAction(null)}>Cancel</button>
+                                        <button onClick={confirmDelete} style={{ background: '#ff4444', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: 4 }}>Delete</button>
+                                    </div>
+                                </>
+                            )}
+                            {dialogAction.type === 'rename' && (
+                                <>
+                                    <h3 style={{ margin: '0 0 1rem 0' }}>Rename File</h3>
+                                    <input 
+                                        autoFocus
+                                        value={dialogAction.value} 
+                                        onChange={e => setDialogAction({ ...dialogAction, value: e.target.value })}
+                                        onKeyDown={e => e.key === 'Enter' && confirmRename()}
+                                        style={{ width: '100%', padding: '0.5rem', marginBottom: '1.5rem' }} 
+                                    />
+                                    <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+                                        <button onClick={() => setDialogAction(null)}>Cancel</button>
+                                        <button onClick={confirmRename} style={{ background: '#007bff', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: 4 }}>Rename</button>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                )}
+                
                 {/* File Grid */}
                 <div style={{ flex: 1, overflowY: 'auto' }}>
                     {items.length === 0 && <div style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Empty Folder</div>}
@@ -451,7 +649,19 @@ export default function FileExplorer(props: FileExplorerProps) {
                             onDragOver={(e) => item.type === 'folder' ? handleDragOver(e) : undefined}
                             onDrop={(e) => item.type === 'folder' ? handleDrop(e, item) : undefined}
                             onClick={(e) => handleRowClick(item, index, e)}
-                            onDoubleClick={() => item.type === 'folder' && handleNavigate(item.name)}
+                            onDoubleClick={() => {
+                                if (item.type === 'folder') {
+                                    handleNavigate(item.name);
+                                } else {
+                                    // Open file
+                                    if (onOpenFile) {
+                                        onOpenFile(item.path);
+                                    } else {
+                                        onClose(); 
+                                        window.open(`/q?file=${encodeURIComponent(item.path)}`, '_self');
+                                    }
+                                }
+                            }}
                         >
                             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1 }}>
                                 {isBulkMode && (
@@ -464,10 +674,13 @@ export default function FileExplorer(props: FileExplorerProps) {
                                 )}
                                 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1 }}>
-                                    <span style={{ fontSize: '1.5rem' }}>{item.type === 'folder' ? '📁' : '📄'}</span>
+                                    <span style={{ fontSize: '1.5rem' }}>
+                                        {item.type === 'folder' ? '📁' : (item.type === 'source' ? '📚' : '📄')}
+                                    </span>
                                     <span style={{ fontWeight: item.type === 'folder' ? 600 : 400 }}>{item.name}</span>
                                 </div>
                             </div>
+
 
                             <div style={{ position: 'relative' }}>
                                 <button 
@@ -479,10 +692,17 @@ export default function FileExplorer(props: FileExplorerProps) {
                                 
                                 {activeMenuId === item.id && (
                                     <div className={styles.dropdownMenu} onClick={e => e.stopPropagation()}>
-                                        <button className={styles.dropdownItem} onClick={() => { setActiveMenuId(null); handleRename(item); }}>
+                                        <button className={styles.dropdownItem} onClick={() => { setActiveMenuId(null); handleRenameClick(item); }}>
                                             Rename
                                         </button>
-                                        <button className={`${styles.dropdownItem} ${styles.delete}`} onClick={() => { setActiveMenuId(null); handleDelete(item); }}>
+                                        
+                                        {item.type === 'source' && (
+                                            <button className={styles.dropdownItem} onClick={() => { setActiveMenuId(null); handleReprocess(item); }}>
+                                                Re-Process
+                                            </button>
+                                        )}
+
+                                        <button className={`${styles.dropdownItem} ${styles.delete}`} onClick={() => { setActiveMenuId(null); handleDeleteClick(item); }}>
                                             Delete
                                         </button>
                                     </div>

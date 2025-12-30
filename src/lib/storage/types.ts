@@ -3,7 +3,7 @@ export interface FileMeta {
     name: string;
     path: string; // Virtual path e.g. 'history/2025-01-01.md'
     updatedAt: number;
-    type: 'file' | 'folder';
+    type: 'file' | 'folder' | 'source';
     remoteId?: string; // Google Drive ID (for robust sync)
 }
 
@@ -16,12 +16,12 @@ export interface StorageProvider {
     /**
      * Write content to a file. Overwrites if exists.
      */
-    saveFile(virtualPath: string, content: string, remoteId?: string): Promise<void>;
+    saveFile(virtualPath: string, content: string | Blob | ArrayBuffer, remoteId?: string): Promise<void>;
 
     /**
      * Read content of a file. Returns null if not found.
      */
-    readFile(virtualPath: string): Promise<string | null>;
+    readFile(virtualPath: string): Promise<string | Blob | ArrayBuffer | null>;
 
     /**
      * List files in a virtual folder.
@@ -39,4 +39,19 @@ export interface StorageProvider {
     getFile(virtualPath: string): Promise<FileMeta | null>;
     resetSyncState(): Promise<void>;
     factoryReset(): Promise<void>;
+    
+    /**
+     * Trigger a manual sync immediately.
+     */
+    forceSync?(): Promise<void>;
+
+    /**
+     * Collect relevant context for the AI from the local knowledge base.
+     */
+    getKnowledgeContext(query?: string): Promise<string>;
+
+    /**
+     * Re-index a file for semantic search.
+     */
+    indexFile(path: string, content: string): Promise<void>;
 }

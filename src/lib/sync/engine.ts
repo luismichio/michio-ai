@@ -1,6 +1,7 @@
 import { db, FileRecord } from '../storage/db';
 import { GoogleDriveClient } from './google-drive';
 import { extractTextFromPdf } from '../pdf';
+import { StorageProvider } from '../storage/types';
 
 const SYNC_TOKEN_KEY = 'drive_sync_token';
 // Changing root folder name to break legacy links and force fresh start
@@ -8,10 +9,12 @@ const ROOT_FOLDER_NAME = 'Michio Journal Data';
 
 export class SyncEngine {
     private drive: GoogleDriveClient;
+    private storage: StorageProvider;
     private syncing: boolean = false;
 
-    constructor(drive: GoogleDriveClient) {
+    constructor(drive: GoogleDriveClient, storage: StorageProvider) {
         this.drive = drive;
+        this.storage = storage;
     }
 
     async sync(onProgress?: (msg: string) => void) {
@@ -205,17 +208,51 @@ export class SyncEngine {
                      return; 
                  }
             } else if (isPdf) {
-                onProgress?.(`Extracting PDF ${path}...`);
+                // For PDFs, we DON'T put content in the PDF record.
+                // We create a "Shadow Source" file: [filename].source.md
+                onProgress?.(`Extracting PDF Source ${path}...`);
                 try {
                     const binary = await this.drive.downloadBinary(driveFile.id);
-                    content = await extractTextFromPdf(binary);
+                    // Clone binary for extraction to avoid detachment issues if PDF.js transfers it
+                    const extractedText = await extractTextFromPdf(binary.slice(0));
+                    
+                    // Create/Update the Shadow Source File record
+                    const sourcePath = `${path}.source.md`; // e.g. misc/paper.pdf.source.md
+                    
+                    // Check if source exists to preserve any manual summary edits?
+                    // For now, we overwrite the text body but maybe keep a header?
+                    // Let's just overwrite for now to ensure accuracy.
+                    
+                    const sourceContent = `## Source: ${driveFile.name}\n\n${extractedText}`;
+
+                    await db.files.put({
+                        path: sourcePath,
+                        content: sourceContent,
+                        type: 'file',
+                        updatedAt: Date.now(),
+                        dirty: 1, // Mark as dirty so it syncs back up to Cloud!
+                        deleted: 0
+                    });
+                    
+                    // Trigger semantic indexing for the newly created source
+                    this.storage.indexFile(sourcePath, sourceContent);
+
+                    // Update the actual PDF record with BINARY content (Local-First)
+                    await db.files.put({
+                        path: path,
+                        content: binary,
+                        updatedAt: new Date(driveFile.modifiedTime || Date.now()).getTime(),
+                        type: 'file',
+                        remoteId: driveFile.id,
+                        dirty: 0,
+                        deleted: 0
+                    });
+
                 } catch (e) {
                     console.error(`Failed to extra PDF ${driveFile.name}`, e);
                     onProgress?.(`Error indexing PDF ${driveFile.name}`);
-                    // We still save the record even if extraction fails, just with empty content?
-                    // Or skip? Let's skip to avoid "broken" context if it's crucial research.
-                    return;
                 }
+                return; // CRITICAL: Return here to avoid overwriting the PDF record below with empty 'content' string
             }
         } else {
             onProgress?.(`Syncing folder ${path}...`);
@@ -224,11 +261,25 @@ export class SyncEngine {
         // 3. Determine Local Conflict / Movement
         const localFile = await db.files.where('remoteId').equals(driveFile.id).first();
         
-        let finalContent = content;
+        let finalContent: string | Blob | ArrayBuffer = content;
         let finalDirty = 0;
         let finalUpdatedAt = new Date(driveFile.modifiedTime).getTime();
 
         if (localFile) {
+            // Check if content matches (checksum) to avoid spurious writes
+            // Only verify checksum for STRING content. Binary diffing is expensive/complex.
+            if (localFile.remoteId === driveFile.id && typeof content === 'string' && typeof localFile.content === 'string') {
+                // Google drive doesn't provide MD5 for all files, but we can assume if timestamp differs we update anyway.
+                // For now, we rely on modifiedTime for non-dirty files.
+                // If remote modifiedTime is older or same as local, and local is not dirty, we can skip.
+                if (new Date(driveFile.modifiedTime).getTime() <= localFile.updatedAt && !localFile.dirty) {
+                    // Content is up-to-date or local is newer and not dirty, no need to update content.
+                    // We still proceed to check for path changes below.
+                    finalContent = localFile.content; // Keep existing local content
+                    finalUpdatedAt = localFile.updatedAt; // Keep existing local updated time
+                }
+            }
+
             // Keep local changes if dirty
             if (localFile.dirty) {
                 finalContent = localFile.content;
@@ -266,6 +317,11 @@ export class SyncEngine {
             updatedAt: finalUpdatedAt,
             dirty: finalDirty
         });
+
+        // Trigger semantic indexing for incoming files
+        if (typeof finalContent === 'string') {
+            this.storage.indexFile(path, finalContent);
+        }
     }
 
 
@@ -291,10 +347,20 @@ export class SyncEngine {
                 if (file.deleted) {
                     if (file.remoteId) {
                         onProgress?.(`Deleting ${this.getName(file.path)}...`);
-                        await this.drive.deleteFile(file.remoteId);
-                        console.log(`Deleted remote file ${file.path}`);
+                        try {
+                            await this.drive.deleteFile(file.remoteId);
+                            console.log(`Deleted remote file ${file.path}`);
+                        } catch (e: any) {
+                            // Check if 403 Forbidden (App created vs User created file scope)
+                            const msg = e.toString() + (e.message || "");
+                            if (msg.includes("403") || msg.includes("not granted")) {
+                                console.warn(`Ignored 403 Forbidden on delete for ${file.path} (likely user-owned). Removing local record anyway.`);
+                            } else {
+                                throw e; // Retry later
+                            }
+                        }
                     }
-                    // Hard delete local record after sync
+                    // Hard delete local record after sync (or if ignored)
                     await db.files.delete(file.path);
                     continue;
                 }

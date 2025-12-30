@@ -1,12 +1,46 @@
 import { StorageProvider, FileMeta } from './types';
-import { db } from './db';
+import { db, FileChunk } from './db';
 import { migrateFromIdbToDexie } from './migrate';
+import { generateEmbedding, chunkText, cosineSimilarity } from '../ai/embeddings';
 
 export class LocalStorageProvider implements StorageProvider {
+    private syncEngine: any; // Type 'any' to avoid circular dependency with SyncEngine
+
+    setSyncEngine(engine: any) {
+        this.syncEngine = engine;
+    }
     
     async init() {
         // Run migration logic once on init
         await migrateFromIdbToDexie();
+    }
+
+    async indexFile(path: string, content: string) {
+        // Only index text-based files in knowledge base (misc/ or source files)
+        const isKnowledge = path.startsWith('misc/') || path.endsWith('.source.md');
+        if (!isKnowledge) return;
+
+        try {
+            console.log(`[RAG] Indexing ${path}...`);
+            // 1. Clear old chunks for this file
+            await db.chunks.where('filePath').equals(path).delete();
+
+            // 2. Chunk text
+            const chunks = chunkText(content);
+            
+            // 3. Generate embeddings and save
+            for (const text of chunks) {
+                const embedding = await generateEmbedding(text);
+                await db.chunks.add({
+                    filePath: path,
+                    content: text,
+                    embedding
+                });
+            }
+            console.log(`[RAG] Finished indexing ${path} (${chunks.length} chunks).`);
+        } catch (e) {
+            console.error(`[RAG] Failed to index ${path}`, e);
+        }
     }
 
     async listFiles(prefix: string): Promise<FileMeta[]> {
@@ -52,39 +86,47 @@ export class LocalStorageProvider implements StorageProvider {
         };
     }
 
-    async readFile(virtualPath: string): Promise<string | null> {
-        const item = await db.files.get(virtualPath);
-        return item ? item.content : null;
+    async readFile(virtualPath: string): Promise<string | Blob | ArrayBuffer | null> {
+        const file = await db.files.get(virtualPath);
+        if (!file || file.deleted) return null;
+        return file.content;
     }
 
-    async saveFile(virtualPath: string, content: string, remoteId?: string): Promise<void> {
+    async saveFile(virtualPath: string, content: string | Blob | ArrayBuffer, remoteId?: string): Promise<void> {
         await this.ensureParent(virtualPath);
-
+        
+        // Optimistic Update
         await db.transaction('rw', db.files, async () => {
             const existing = await db.files.get(virtualPath);
-            
             await db.files.put({
                 path: virtualPath,
-                content,
+                content: content,
                 updatedAt: Date.now(),
-                type: 'file', // Defaulting to file for now
-                remoteId: remoteId || existing?.remoteId,
-                dirty: 1,
+                type: 'file',
+                remoteId: remoteId || existing?.remoteId, // Preserve remoteId if updating content locally
+                dirty: 1, // Mark as dirty (needs sync up)
                 deleted: 0
             });
         });
+
+        if (typeof content === 'string') {
+            this.indexFile(virtualPath, content);
+        }
     }
 
     async appendFile(virtualPath: string, content: string): Promise<void> {
         await this.ensureParent(virtualPath);
 
+        let finalContent = "";
         await db.transaction('rw', db.files, async () => {
              const existing = await db.files.get(virtualPath);
-             const newContent = existing ? (existing.content + '\n\n' + content) : content;
+             finalContent = (existing && typeof existing.content === 'string') 
+                ? (existing.content + '\n\n' + content) 
+                : content;
              
              await db.files.put({
                 path: virtualPath,
-                content: newContent,
+                content: finalContent,
                 updatedAt: Date.now(),
                 type: 'file',
                 remoteId: existing?.remoteId,
@@ -92,6 +134,9 @@ export class LocalStorageProvider implements StorageProvider {
                 deleted: 0
             });
         });
+
+        // Background Indexing
+        this.indexFile(virtualPath, finalContent);
     }
 
     async renameFile(oldPath: string, newPath: string): Promise<void> {
@@ -144,13 +189,17 @@ export class LocalStorageProvider implements StorageProvider {
             // 1. Delete the item itself
             await db.files.update(virtualPath, { deleted: 1, dirty: 1 });
 
-            // 2. If it's a folder, soft-delete all children recursively
+            // 2. Delete semantic chunks
+            await db.chunks.where('filePath').equals(virtualPath).delete();
+
+            // 3. If it's a folder, soft-delete all children recursively
             if (existing.type === 'folder') {
                 const prefix = virtualPath + '/';
                 const children = await db.files.where('path').startsWith(prefix).toArray();
                 
                 for (const child of children) {
                     await db.files.update(child.path, { deleted: 1, dirty: 1 });
+                    await db.chunks.where('filePath').equals(child.path).delete();
                 }
             }
         });
@@ -221,9 +270,10 @@ export class LocalStorageProvider implements StorageProvider {
 
     async factoryReset() {
         console.warn("PERFORMING FACTORY RESET...");
-        await db.transaction('rw', db.files, db.settings, async () => {
+        await db.transaction('rw', db.files, db.settings, db.chunks, async () => {
             await db.files.clear();
             await db.settings.clear();
+            await db.chunks.clear();
         });
         
         // Re-init default folders
@@ -231,6 +281,13 @@ export class LocalStorageProvider implements StorageProvider {
         await this.ensureFolder('history');
         
         console.log("Factory Reset Complete.");
+    }
+
+    async forceSync() {
+        console.log("Force Sync Requested");
+        if (this.syncEngine) {
+            await this.syncEngine.sync();
+        }
     }
 
     private async ensureFolder(path: string) {
@@ -244,7 +301,45 @@ export class LocalStorageProvider implements StorageProvider {
         });
     }
 
-    async getKnowledgeContext(): Promise<string> {
+    async getKnowledgeContext(query?: string): Promise<string> {
+        if (query) {
+            console.log(`[RAG] Performing Semantic Search for: "${query}"`);
+            try {
+                const queryEmbedding = await generateEmbedding(query);
+                const allChunks = await db.chunks.toArray();
+                
+                if (allChunks.length === 0) {
+                    return "--- Knowledge Base ---\nNo indexed memory found. Falling back to basic context.\n" + await this.getLegacyKnowledgeContext();
+                }
+
+                // Rank chunks by similarity
+                const ranked = allChunks.map(chunk => ({
+                    chunk,
+                    similarity: cosineSimilarity(queryEmbedding, chunk.embedding)
+                })).sort((a, b) => b.similarity - a.similarity);
+
+                // Take top 5 relevant chunks
+                const topChunks = ranked.slice(0, 5).filter(r => r.similarity > 0.1); // 0.1 threshold to avoid noise
+                
+                if (topChunks.length === 0) {
+                    return "--- Knowledge Base ---\nNo relevant files found for this query.\n";
+                }
+
+                let ctx = "--- Relevant Memory (Semantic Search) ---\n";
+                for (const item of topChunks) {
+                    ctx += `\n[From: ${item.chunk.filePath}]\n${item.chunk.content}\n---\n`;
+                }
+                return ctx;
+            } catch (e) {
+                console.error("[RAG] Search failed", e);
+                return await this.getLegacyKnowledgeContext();
+            }
+        } else {
+            return await this.getLegacyKnowledgeContext();
+        }
+    }
+
+    private async getLegacyKnowledgeContext(): Promise<string> {
         // Get all files in misc/
         const files = await db.files.where('path').startsWith('misc/').toArray();
         const readableFiles = files.filter(f => !f.deleted && f.type === 'file');
@@ -253,7 +348,12 @@ export class LocalStorageProvider implements StorageProvider {
         if (readableFiles.length === 0) return ctx + "No files found in Knowledge Base.\n";
 
         let totalLength = 0;
-        const CHAR_LIMIT = 50000; // Total context limit (approx 12k tokens)
+        // Reducing limit to 8k (~2k tokens) to be extremely safe with Groq Free Tier (12k TPM)
+        const CHAR_LIMIT = 8000; 
+
+
+        // 1. Identify Sources to avoid duplication
+        const sourcePaths = new Set(readableFiles.map(f => f.path));
 
         for (const file of readableFiles) {
             if (totalLength > CHAR_LIMIT) {
@@ -261,14 +361,31 @@ export class LocalStorageProvider implements StorageProvider {
                 break;
             }
 
+            // Check if this is a raw PDF that has a Shadow Source
+            const potentialSourcePath = file.path + '.source.md';
+            if (file.path.endsWith('.pdf') && sourcePaths.has(potentialSourcePath)) {
+                // Skip the raw PDF, we will read the .source.md instead
+                continue;
+            }
+
             // Include text-based files and PDFs
             const isText = file.path.endsWith('.md') || file.path.endsWith('.txt');
             const isPdf = file.path.endsWith('.pdf');
             
             if (isText || isPdf) {
-                // Truncate individual massive files (e.g. books) to 20k chars (approx 5k tokens)
-                const content = file.content.length > 20000 
-                    ? file.content.substring(0, 20000) + "\n...[Content Truncated]..." 
+                // Ensure content is string before string operations
+                if (typeof file.content !== 'string') {
+                    // Binary content (e.g. locally stored PDF).
+                    // We cannot include binary in AI Context.
+                    // However, we likely have a .source.md for this PDF, so we skipped it above (if source exists).
+                    // If source does NOT exist (e.g. old file or failed extract), and we have binary, we simply say "Binary Content".
+                    ctx += `\nFile: ${file.path} (Binary Content - Use Source)\n---\n`;
+                    continue;
+                }
+
+                // Truncate individual massive files (e.g. books) to 10k chars (approx 2.5k tokens)
+                const content = file.content.length > 10000 
+                    ? file.content.substring(0, 10000) + "\n...[Content Truncated]..." 
                     : file.content;
                 
                 ctx += `\nFile: ${file.path}\nContent:\n${content}\n---\n`;
@@ -278,6 +395,6 @@ export class LocalStorageProvider implements StorageProvider {
             }
         }
         return ctx;
-        return ctx;
+
     }
 }
