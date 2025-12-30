@@ -25,6 +25,52 @@ export async function chatWithMichio(userPrompt: string, context: string, histor
             content: msg.content
         }));
 
+        // Define Tools
+        const tools = [
+            {
+                type: "function",
+                function: {
+                    name: "update_file",
+                    description: "Update the content of an existing file in the user's Knowledge Base (misc/ folder). Use this when the user explicitly asks to edit, modify, or append to a note.",
+                    parameters: {
+                        type: "object",
+                        properties: {
+                            filePath: {
+                                type: "string",
+                                description: "The path of the file to update (e.g., 'misc/notes/todo.md').",
+                            },
+                            newContent: {
+                                type: "string",
+                                description: "The FULL new content of the file. This REPLACES the old content.",
+                            },
+                        },
+                        required: ["filePath", "newContent"],
+                    },
+                },
+            },
+            {
+                type: "function",
+                function: {
+                    name: "create_file",
+                    description: "Create a new file. If the folder path doesn't exist, it will be created automatically. Use this for creating new notes, lists, or other documents.",
+                    parameters: {
+                        type: "object",
+                        properties: {
+                            filePath: {
+                                type: "string",
+                                description: "The path for the new file (e.g., 'misc/shopping/list.md').",
+                            },
+                            content: {
+                                type: "string",
+                                description: "The content of the new file.",
+                            },
+                        },
+                        required: ["filePath", "content"],
+                    },
+                },
+            }
+        ];
+
         const chatCompletion = await groq.chat.completions.create({
             messages: [
                 {
@@ -51,10 +97,24 @@ export async function chatWithMichio(userPrompt: string, context: string, histor
             max_tokens: 1024,
             top_p: 1,
             stream: false,
-            stop: null
+            stop: null,
+            tools: tools as any[],
+            tool_choice: "auto"
         });
 
-        const content = chatCompletion.choices[0]?.message?.content || "Michio is silent.";
+        const choice = chatCompletion.choices[0];
+        const message = choice?.message;
+
+        // Check for Tool Calls
+        if (message?.tool_calls && message.tool_calls.length > 0) {
+            return { 
+                content: message.content, // Might be null if tool call only
+                tool_calls: message.tool_calls,
+                usage: chatCompletion.usage 
+            };
+        }
+
+        const content = message?.content || "Michio is silent.";
         const usage = chatCompletion.usage; 
 
         return { content, usage };

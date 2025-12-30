@@ -32,6 +32,10 @@ export default function Home() {
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
   const [isExplorerOpen, setIsExplorerOpen] = useState(false);
   const [viewingSource, setViewingSource] = useState<{title: string, content: string} | null>(null);
+  
+  // Message Modal State
+  const [messageModal, setMessageModal] = useState<{title: string, message: string} | null>(null);
+  const showMessage = (title: string, message: string) => setMessageModal({ title, message });
   const streamRef = useRef<HTMLDivElement>(null);
   const hasScrolledRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -57,8 +61,24 @@ export default function Home() {
   const { isSyncing, syncNow, syncError, syncMessage, syncLogs } = useSync(storage, session, update, currentDate);
 
   const handleSaveSource = async (topic: string, fileName: string, content: string) => {
-      // Save to: misc/topic/filename
-      await storage.saveFile(`misc/${topic}/${fileName}`, content);
+      // 1. Generate Auto-Summary
+      let finalContent = content;
+      try {
+          const res = await fetch('/api/ai/summarize', {
+              method: 'POST',
+              body: JSON.stringify({ content }),
+              headers: { 'Content-Type': 'application/json' }
+          });
+          const data = await res.json();
+          if (data.summary) {
+              finalContent = `> **Summary**: ${data.summary}\n\n---\n\n${content}`;
+          }
+      } catch (e) {
+          console.error("Auto-summary failed", e);
+      }
+
+      // 2. Save to: misc/topic/filename
+      await storage.saveFile(`misc/${topic}/${fileName}`, finalContent);
       
       // Notify Chat (System Message?) or just trigger Sync
       const timestamp = new Date().toLocaleTimeString();
@@ -174,6 +194,7 @@ export default function Home() {
         
         const responseText = data.response;
         const usageData = data.usage; // { prompt_tokens, completion_tokens, total_tokens }
+        const toolCalls = data.tool_calls;
 
         // Update Session Stats
         if (usageData) {
@@ -185,16 +206,104 @@ export default function Home() {
         }
 
         const respTimestamp = new Date().toLocaleTimeString();
-        setMessages(prev => [...prev, { 
-            role: 'michio', 
-            content: responseText, 
-            timestamp: respTimestamp,
-            usage: usageData ? { total_tokens: usageData.completion_tokens } : undefined
-        }]);
-        
-        // 4. Save Michio Response Locally
-        const michioEntry = `**Michio**: ${responseText}\n`;
-        await storage.appendFile(`history/${currentDate}.md`, michioEntry);
+
+        // Handle Tool Calls (e.g. update_file)
+        if (toolCalls && toolCalls.length > 0) {
+             for (const tool of toolCalls) {
+                 if (tool.function.name === 'update_file') {
+                     try {
+                         const args = JSON.parse(tool.function.arguments);
+                         let newContent = args.newContent;
+
+                         // Auto-Summarize for AI Edits too
+                         try {
+                             const res = await fetch('/api/ai/summarize', {
+                                 method: 'POST',
+                                 body: JSON.stringify({ content: newContent }),
+                                 headers: { 'Content-Type': 'application/json' }
+                             });
+                             const data = await res.json();
+                             if (data.summary) {
+                                 newContent = `> **Summary**: ${data.summary}\n\n---\n\n${newContent}`;
+                             }
+                         } catch (err) {
+                             console.error("Tool Summary Failed", err);
+                             // Proceed with raw content
+                         }
+
+                         await storage.updateFile(args.filePath, newContent);
+                         
+                         // Create success message
+                         const confirmMsg = `I've updated *${args.filePath}* with the new content (and summary).`;
+                         
+                         setMessages(prev => [...prev, { 
+                            role: 'michio', 
+                            content: confirmMsg, 
+                            timestamp: respTimestamp,
+                            usage: usageData ? { total_tokens: usageData.completion_tokens } : undefined
+                        }]);
+
+                        // Save Log
+                        await storage.appendFile(`history/${currentDate}.md`, `**Michio**: ${confirmMsg}\n`);
+                     } catch (e: any) {
+                         console.error("Tool Exec Error", e);
+                         setMessages(prev => [...prev, { role: 'michio', content: `Failed to update file: ${e.message}`, timestamp: respTimestamp }]);
+                     }
+                 }
+
+                 if (tool.function.name === 'create_file') {
+                     try {
+                         const args = JSON.parse(tool.function.arguments);
+                         let content = args.content;
+
+                         // Auto-Summarize
+                         try {
+                             const res = await fetch('/api/ai/summarize', {
+                                 method: 'POST',
+                                 body: JSON.stringify({ content: content }),
+                                 headers: { 'Content-Type': 'application/json' }
+                             });
+                             const data = await res.json();
+                             if (data.summary) {
+                                 content = `> **Summary**: ${data.summary}\n\n---\n\n${content}`;
+                             }
+                         } catch (err) {
+                             console.error("Tool Summary Failed", err);
+                         }
+
+                         await storage.saveFile(args.filePath, content);
+                         
+                         const confirmMsg = `I've created *${args.filePath}* with the generated content (and summary).`;
+                         
+                         setMessages(prev => [...prev, { 
+                            role: 'michio', 
+                            content: confirmMsg, 
+                            timestamp: respTimestamp,
+                            usage: usageData ? { total_tokens: usageData.completion_tokens } : undefined
+                        }]);
+
+                        await storage.appendFile(`history/${currentDate}.md`, `**Michio**: ${confirmMsg}\n`);
+                     } catch (e: any) {
+                         console.error("Tool Exec Error", e);
+                         setMessages(prev => [...prev, { role: 'michio', content: `Failed to create file: ${e.message}`, timestamp: respTimestamp }]);
+                     }
+                 }
+             }
+             // For now, we stop here. In a real agent loop, we'd feed the result back to AI.
+             // But for "Edit this file", a confirmation is enough.
+        } else {
+             // Normal Text Response
+             setMessages(prev => [...prev, { 
+                role: 'michio', 
+                content: responseText, 
+                timestamp: respTimestamp,
+                usage: usageData ? { total_tokens: usageData.completion_tokens } : undefined
+            }]);
+            
+            // 4. Save Michio Response Locally
+            const michioEntry = `**Michio**: ${responseText}\n`;
+            await storage.appendFile(`history/${currentDate}.md`, michioEntry);
+        }
 
         // 5. Trigger Cloud Sync (if online)
         syncNow();
@@ -217,18 +326,19 @@ export default function Home() {
   const handleOpenFile = async (path: string) => {
       try {
           const content = await storage.readFile(path);
-          if (content && typeof content === 'string') {
+          // Check if content is string (even empty string is valid)
+          if (typeof content === 'string') {
               setViewingSource({ 
                   title: path.split('/').pop() || path, 
                   content 
               });
               setIsExplorerOpen(false); // Close Explorer if open
           } else {
-              alert("Failed to read file content.");
+              showMessage("Error", "Failed to read file content (empty or binary).");
           }
       } catch (e) {
           console.error("Read Error", e);
-          alert("Error reading file.");
+          showMessage("Error", "Error reading file.");
       }
   };
 
@@ -481,6 +591,18 @@ export default function Home() {
             content={viewingSource.content} 
             onClose={() => setViewingSource(null)} 
         />
+      )}
+
+      {messageModal && (
+          <div className={styles.modalOverlay} onClick={() => setMessageModal(null)}>
+              <div style={{ background: 'white', padding: '1.5rem', borderRadius: 8, maxWidth: 400 }} onClick={e => e.stopPropagation()}>
+                  <h3 style={{ marginTop: 0 }}>{messageModal.title}</h3>
+                  <p style={{ whiteSpace: 'pre-wrap' }}>{messageModal.message}</p>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button onClick={() => setMessageModal(null)} style={{ background: '#007bff', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: 4, cursor: 'pointer' }}>OK</button>
+                  </div>
+              </div>
+          </div>
       )}
     </main>
   );

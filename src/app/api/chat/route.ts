@@ -46,13 +46,19 @@ export const POST = auth(async function POST(req) {
 
 
     // 2. Chat with Groq (Pass history)
-    const { content: responseText, usage } = await chatWithMichio(message, context, messageHistory);
+    const result = await chatWithMichio(message, context, messageHistory);
 
-    // 3. Log to History
-    // DEPRECATED: Client now handles logging + SyncEngine uploads.
-    // We do NOT write to Drive here anymore to avoid "Double Write" race conditions.
-    // const logEntry = `### ${new Date().toLocaleTimeString()}\n**User**: ${message}\n**Michio**: ${response}\n`;
-    // if (req.auth) ...
+    // 3. Handle Tool Calls
+    if (result.tool_calls) {
+        // Forward tools to client for execution
+        return NextResponse.json({ 
+            response: null, // No text response yet
+            tool_calls: result.tool_calls,
+            usage: result.usage 
+        });
+    }
+
+    const { content: responseText, usage } = result;
 
     return NextResponse.json({ response: responseText, usage });
 

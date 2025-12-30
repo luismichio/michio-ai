@@ -139,6 +139,27 @@ export class LocalStorageProvider implements StorageProvider {
         this.indexFile(virtualPath, finalContent);
     }
 
+    async updateFile(virtualPath: string, newContent: string): Promise<void> {
+        // 1. Verify existence (Logic: Can only update what exists)
+        const existing = await db.files.get(virtualPath);
+        if (!existing || existing.deleted) {
+            throw new Error(`File '${virtualPath}' not found. Cannot update.`);
+        }
+
+        // 2. Perform Update (Overwrite content)
+        await db.transaction('rw', db.files, async () => {
+             await db.files.update(virtualPath, {
+                content: newContent,
+                updatedAt: Date.now(),
+                dirty: 1, // Mark dirty for sync
+                deleted: 0
+             });
+        });
+
+        // 3. Re-Index for RAG
+        this.indexFile(virtualPath, newContent);
+    }
+
     async getRecentLogs(limitHours: number): Promise<string> {
         const now = new Date();
         const startTime = new Date(now.getTime() - limitHours * 60 * 60 * 1000);

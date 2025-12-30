@@ -139,6 +139,17 @@ Because Mich.io uses a **BYO (Bring Your Own)** architecture, your overhead is r
 
 ## 📜 Development Changelog
 
+### v0.7.0 - The "Agentic" Upgrade (Dec 2025)
+*   **AI Agency**:
+    *   **File Creation & Editing**: Michio can now create, edit, and organize notes directly via chat (e.g., "Create a shopping list folder").
+    *   **Tool Usage**: Implemented a robust "Tool Calling" loop where the AI requests actions (Create/Update) and the client executes them securely.
+*   **Auto-Summarization**:
+    *   **Smart Ingestion**: Uploaded PDFs and text files are automatically summarized by a smaller LLM call, creating concise "anchors" for better RAG retrieval.
+    *   **Dynamic Updates**: Edited files are re-summarized on the fly to keep the Knowledge Base fresh.
+*   **Refined UX**:
+    *   **Custom Modals**: Replaced intrusive browser alerts with custom, theme-consistent Modal dialogs for errors and confirmations.
+    *   **Robust Error Handling**: Improved binary file handling and "empty file" states in the viewer.
+
 ### v0.6.0 - The "Rolling Context" (Dec 2025)
 *   **Rolling Window Context**: Replaced the static "Daily Log" context with a valid dynamic "6-Hour Rolling Window". This ensures Michio remembers conversations across midnight and keeps the context window efficient.
 *   **Context Transparency**: Added real-time Token Counters (Session Total & Per-Message) to help users track AI usage and cost.

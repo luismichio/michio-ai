@@ -26,8 +26,15 @@ export default function FileExplorer(props: FileExplorerProps) {
     const lastInteractionIndex = useRef<number>(-1);
 
     // Dialog State
-    type DialogAction = { type: 'rename', file: FileMeta, value: string } | { type: 'delete', file: FileMeta };
+    type DialogAction = 
+        | { type: 'rename', file: FileMeta, value: string } 
+        | { type: 'delete', file: FileMeta }
+        | { type: 'alert', title: string, message: string, onConfirm?: () => void };
     const [dialogAction, setDialogAction] = useState<DialogAction | null>(null);
+
+    const showAlert = (title: string, message: string, onConfirm?: () => void) => {
+        setDialogAction({ type: 'alert', title, message, onConfirm });
+    };
 
     // Initial Migration Trigger
     useEffect(() => {
@@ -166,11 +173,25 @@ export default function FileExplorer(props: FileExplorerProps) {
                 // Clone buffer for extraction so original isn't detached
                 const extractedText = await extractTextFromPdf(buffer.slice(0));
                 
-                // 1. Create Shadow Source
-                const sourcePath = `${path}.source.md`;
-                const sourceContent = `## Source: ${file.name}\n\n${extractedText}`;
+                // 1. Generate Summary
+                let finalContent = `## Source: ${file.name}\n\n${extractedText}`;
+                try {
+                    const res = await fetch('/api/ai/summarize', {
+                        method: 'POST',
+                        body: JSON.stringify({ content: extractedText }),
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    const data = await res.json();
+                    if (data.summary) {
+                        finalContent = `> **Summary**: ${data.summary}\n\n---\n\n${finalContent}`;
+                    }
+                } catch (e) {
+                    console.error("Auto-summary failed", e);
+                }
                 
-                await storage.saveFile(sourcePath, sourceContent);
+                // 2. Create Shadow Source
+                const sourcePath = `${path}.source.md`;
+                await storage.saveFile(sourcePath, finalContent);
                 
                 // 2. Save "Raw" PDF Binary (Local-First)
                 // Now that storage supports binary, we save the full PDF.
@@ -188,7 +209,22 @@ export default function FileExplorer(props: FileExplorerProps) {
         }
 
         // Standard Text Save
-        await storage.saveFile(path, content);
+        let finalContent = content;
+        try {
+            const res = await fetch('/api/ai/summarize', {
+                method: 'POST',
+                body: JSON.stringify({ content }),
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await res.json();
+            if (data.summary) {
+                finalContent = `> **Summary**: ${data.summary}\n\n---\n\n${content}`;
+            }
+        } catch (e) {
+            console.error("Auto-summary failed", e);
+        }
+
+        await storage.saveFile(path, finalContent);
     };    // loadFiles(); // Removed: Reactive
     
 
@@ -308,32 +344,60 @@ export default function FileExplorer(props: FileExplorerProps) {
     };
 
     const handleReprocess = async (file: FileMeta) => {
-        if (file.type !== 'source') return;
-        if (!confirm(`Re-process ${file.name}? This will re-extract text from the original PDF.`)) return;
-
-        const originalPath = file.path.replace('.source.md', '');
+        // Allow re-process for 'source' (PDFs) AND standard files (to generate summary)
+        if (file.type !== 'source' && file.type !== 'file') return;
         
+        if (!confirm(`Re-process ${file.name}? This will generate a new summary.${file.type==='source' ? ' If it is a PDF, text will be re-extracted.' : ''}`)) return;
+
         try {
-            // Read the binary from the hidden PDF file
-            const pdfContent = await storage.readFile(originalPath);
-            
-            if (!pdfContent) {
-                 alert("Original PDF not found locally. Please Sync Down from Cloud or Re-upload.");
-                 return;
-            }
-            
-            if (pdfContent instanceof ArrayBuffer) {
-                const extractedText = await extractTextFromPdf(pdfContent);
-                const sourceContent = `## Source: ${file.name.replace(' (Source)', '')}\n\n${extractedText}`;
-                await storage.saveFile(file.path, sourceContent);
-                alert("Re-processing complete!");
+            let contentToSummarize = "";
+
+            if (file.type === 'source') {
+                 // PDF Logic
+                 const originalPath = file.path.replace('.source.md', '');
+                 const pdfContent = await storage.readFile(originalPath);
+                 
+                 if (!pdfContent) throw new Error("Original PDF not found.");
+                 if (!(pdfContent instanceof ArrayBuffer)) throw new Error("Local file is not binary.");
+
+                 contentToSummarize = await extractTextFromPdf(pdfContent);
+                 
+                 // Prepend Source Header
+                 contentToSummarize = `## Source: ${file.name.replace(' (Source)', '')}\n\n${contentToSummarize}`; // Keep raw for now, summary added below
             } else {
-                 alert("Local file is not binary! Cannot re-process.");
+                 // Standard File Logic
+                 const raw = await storage.readFile(file.path);
+                 if (typeof raw !== 'string') throw new Error("File content is not text.");
+                 // Simplify: If it already has a summary block, strip it first?
+                 // Heuristic: If starts with "> **Summary**:", remove up to "---"
+                 contentToSummarize = raw;
+                 if (raw.trim().startsWith('> **Summary**:')) {
+                     const parts = raw.split('\n\n---\n\n');
+                     if (parts.length > 1) {
+                         contentToSummarize = parts.slice(1).join('\n\n---\n\n');
+                     }
+                 }
             }
+
+            // Call Summarizer
+            const res = await fetch('/api/ai/summarize', {
+                method: 'POST',
+                body: JSON.stringify({ content: contentToSummarize }),
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await res.json();
+            
+            let finalContent = contentToSummarize;
+            if (data.summary) {
+                finalContent = `> **Summary**: ${data.summary}\n\n---\n\n${contentToSummarize}`;
+            }
+
+            await storage.saveFile(file.path, finalContent);
+            showAlert("Success", "Re-processing complete!");
 
         } catch (e: any) {
              console.error("Reprocess failed", e);
-             alert("Failed: " + e.message);
+             showAlert("Error", "Failed: " + e.message);
         }
     };
 
@@ -554,9 +618,10 @@ export default function FileExplorer(props: FileExplorerProps) {
                         <button onClick={async () => {
                             if (storage.forceSync) {
                                 await storage.forceSync();
-                                alert("Sync triggered!");
+                                await storage.forceSync();
+                                showAlert("Sync", "Sync triggered!");
                             } else {
-                                alert("Sync not available");
+                                showAlert("Sync", "Sync not available");
                             }
                         }} style={{ cursor: 'pointer', marginRight: '1rem', color: '#0070f3', border: '1px solid #0070f3', background: 'transparent', borderRadius: 4, padding: '2px 8px' }}>
                             ⟳ Sync Now
@@ -614,6 +679,18 @@ export default function FileExplorer(props: FileExplorerProps) {
                                     <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
                                         <button onClick={() => setDialogAction(null)}>Cancel</button>
                                         <button onClick={confirmDelete} style={{ background: '#ff4444', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: 4 }}>Delete</button>
+                                    </div>
+                                </>
+                            )}
+                            {dialogAction.type === 'alert' && (
+                                <>
+                                    <h3 style={{ margin: '0 0 1rem 0' }}>{dialogAction.title}</h3>
+                                    <p style={{ marginBottom: '1.5rem', whiteSpace: 'pre-wrap' }}>{dialogAction.message}</p>
+                                    <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+                                        <button onClick={() => {
+                                            if (dialogAction.onConfirm) dialogAction.onConfirm();
+                                            setDialogAction(null);
+                                        }} style={{ background: '#007bff', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: 4 }}>OK</button>
                                     </div>
                                 </>
                             )}
@@ -696,11 +773,9 @@ export default function FileExplorer(props: FileExplorerProps) {
                                             Rename
                                         </button>
                                         
-                                        {item.type === 'source' && (
-                                            <button className={styles.dropdownItem} onClick={() => { setActiveMenuId(null); handleReprocess(item); }}>
-                                                Re-Process
-                                            </button>
-                                        )}
+                                        <button className={styles.dropdownItem} onClick={() => { setActiveMenuId(null); handleReprocess(item); }}>
+                                            Re-Process
+                                        </button>
 
                                         <button className={`${styles.dropdownItem} ${styles.delete}`} onClick={() => { setActiveMenuId(null); handleDeleteClick(item); }}>
                                             Delete
@@ -752,7 +827,7 @@ export default function FileExplorer(props: FileExplorerProps) {
                                    const active = await db.files.count(); // actually this is all. need filter.
                                    const deleted = await db.files.where('deleted').equals(1).count();
                                    const dirty = await db.files.where('dirty').equals(1).count();
-                                   alert(`Total Records: ${active}\nSoft Deleted: ${deleted}\nUnsynced (Dirty): ${dirty}`);
+                                   showAlert("Database Stats", `Total Records: ${active}\nSoft Deleted: ${deleted}\nUnsynced (Dirty): ${dirty}`);
                                }} style={{ padding: '4px 8px' }}>
                                    Check Stats
                                </button>
