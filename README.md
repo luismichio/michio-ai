@@ -15,28 +15,30 @@ Unlike traditional assistants, Mich.io is built on the Bring Your Own (BYO) prin
 - Your Soul A high-fidelity, multimodal interface designed for deep, human-like interaction.
 
 ## 🚀 Journey-Centric Features
-- **Proactive Journaling:** Mich.io doesn't just wait for you to type; it can prompt reflections based on your day's data (e.g., correlating your verbal journal with your Fitbit health metrics).
-- **The "Wisdom" Layer:** Uses the 2M context window to synthesize your past experiences, helping you see the long-term patterns in your behavior and growth.
-- **Multimodal Log:** Capture the journey through voice, images, or written notes. Mich.io identifies the "landmarks" (recipes, places, research) and files them automatically.
-
-- Live Voice Mode Engage in natural, interruptible conversations via the Gemini Live API.
-- Automated Routing Mich.io identifies if you're talking about a recipe, a place, or a research insight and automatically saves it to the correct database (NotionDrive).
-- Health Context Real-time correlation between your verbal journal entries and your Fitbit health metrics.
-- Agentic PKM Uses Model Context Protocol (MCP) to interact with your data silos as if they were a single memory.
+- **Proactive Journaling:** Mich.io doesn't just wait for you to type; it can prompt reflections based on your day's data.
+- **Local RAG (Semantic Search):**  
+  Mich.io processes your knowledge base **entirely on-device** using TensorFlow.js and the Universal Sentence Encoder.
+  - **Private:** Your massive notes library is indexed locally; no data leaves your browser.
+  - **Efficient:** Reduces AI token usage by 75% by sending only the most relevant ~2k characters to the LLM.
+  - **Fast:** Indexing runs in a background Web Worker for zero UI lag.
+- **Offline-First Architecture:** Built on Dexie.js (IndexedDB). You can journal, search, and browse your history without an internet connection. Data syncs to Google Drive when you're back online.
+- **The "Wisdom" Layer:** Uses a large context model (Groq/Llama 3) to synthesize your past experiences, helping you see long-term patterns.
+- **File Explorer:** A robust UI for managing your "Memory" (Google Drive files) with drag-and-drop, bulk moves, and rename capabilities.
+- **Journey Map:** A calendar-based history view to revisit past entries and track your consistency.
 
 ## 🛠 Tech Stack
-- **Framework**: Next.js 14+ (App Router).
+- **Framework**: Next.js 16 (Turbopack)
 - **Storage Strategy**: **Local First** (Dexie.js / IndexedDB). Core functionality works 100% locally.
-- **Sync Module**: Google Drive Sync (Optional). Acts as a backup/sync layer if the user chooses to connect.
+- **Sync Module**: Google Drive Sync (Background Worker with ID-based logic).
 - **AI Engine**: Groq (Llama 3.3 70B) for reasoning.
-- **Protocol**: MCP (Model Context Protocol) for future extensibility.
+- **Embedding Engine**: TensorFlow.js + Universal Sentence Encoder (Local Web Worker). RAG is done locally.
+- **Protocol**: MCP (Model Context Protocol) ready.
 
-## UI features
-- main screen: voice or text input, live voice mode, 
-- other screens: 
-    - calendar view of the journal entries. works as a history of the entries. Similar to a ship's log, or Gemini Chat history. Initially organized per day. User can tag entries to group them by different categories.
-    - md text editor for simpler text entries. User can edit the files in their own apps, but the files/folders must have Michios permission to be accessed to read edit.
-    - media gallery
+## UI Components
+- **Main Interface**: Clean, dual-mode input (Voice/Text) with live streaming responses.
+- **File Explorer**: Windows-like file management for your cloud storage.
+- **Calendar View**: "Journey Map" for navigating your journal history.
+- **PDF Reader**: Built-in parsing for uploading and chatting with PDF documents.
 
 ---
 I'm Mich.io. I'm here. What are we working on today
