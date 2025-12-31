@@ -1,11 +1,11 @@
 import { google } from 'googleapis';
 
-const MICHIO_FOLDER_NAME = 'Michio Journal';
+const MEECHI_FOLDER_NAME = 'Meechi Journal';
 
-export async function getOrCreateMichioFolder(drive: any) {
+export async function getOrCreateMeechiFolder(drive: any) {
   // 1. Search for existing folder
   const listRes = await drive.files.list({
-    q: `mimeType = 'application/vnd.google-apps.folder' and name = '${MICHIO_FOLDER_NAME}' and trashed = false`,
+    q: `mimeType = 'application/vnd.google-apps.folder' and name = '${MEECHI_FOLDER_NAME}' and trashed = false`,
     fields: 'files(id, name)',
   });
 
@@ -16,7 +16,7 @@ export async function getOrCreateMichioFolder(drive: any) {
   // 2. Create if not exists
   const createRes = await drive.files.create({
     requestBody: {
-      name: MICHIO_FOLDER_NAME,
+      name: MEECHI_FOLDER_NAME,
       mimeType: 'application/vnd.google-apps.folder',
     },
     fields: 'id',
@@ -57,7 +57,7 @@ export async function appendToDailyLog(accessToken: string, entry: string) {
   const drive = google.drive({ version: 'v3', auth });
 
   try {
-    const rootId = await getOrCreateMichioFolder(drive);
+    const rootId = await getOrCreateMeechiFolder(drive);
     const historyId = await getOrCreateSubfolder(drive, rootId, 'history');
     
     // Use Local Time for YYYY-MM-DD
@@ -119,11 +119,11 @@ export async function listDriveFiles(accessToken: string) {
   const drive = google.drive({ version: 'v3', auth });
 
   try {
-    const folderId = await getOrCreateMichioFolder(drive);
+    const folderId = await getOrCreateMeechiFolder(drive);
 
-    // List files specifically INSIDE the Michio folder (recursive search not efficient here, keeping simple)
+    // List files specifically INSIDE the Meechi folder (recursive search not efficient here, keeping simple)
     // For PoC, sticking to just finding md/txt anywhere in that folder structure would be complex.
-    // Let's just look in the ROOT Michio folder for context for now to verify "Structure" works.
+    // Let's just look in the ROOT Meechi folder for context for now to verify "Structure" works.
     const res = await drive.files.list({
       pageSize: 10,
       q: `'${folderId}' in parents and (mimeType = 'text/markdown' or mimeType = 'text/plain') and trashed = false`,
@@ -186,7 +186,7 @@ export async function listFilesInFolder(accessToken: string, folderName: string)
   const drive = google.drive({ version: 'v3', auth });
 
   try {
-    const rootId = await getOrCreateMichioFolder(drive);
+    const rootId = await getOrCreateMeechiFolder(drive);
     const targetFolderId = await getOrCreateSubfolder(drive, rootId, folderName);
     
     // Queue: { id, path } - path is relative to targetFolderId (e.g. "" or "Fatherhood")

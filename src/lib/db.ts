@@ -6,7 +6,7 @@ interface JournalEntry {
   createdAt: Date;
 }
 
-interface MichioDB extends DBSchema {
+interface MeechiDB extends DBSchema {
   journal: {
     key: number;
     value: JournalEntry;
@@ -17,7 +17,7 @@ interface MichioDB extends DBSchema {
 const DB_NAME = 'michio-guest-db';
 
 export async function initDB() {
-  return openDB<MichioDB>(DB_NAME, 1, {
+  return openDB<MeechiDB>(DB_NAME, 1, {
     upgrade(db) {
       const store = db.createObjectStore('journal', {
         keyPath: 'id',

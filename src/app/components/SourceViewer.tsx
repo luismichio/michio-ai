@@ -1,4 +1,5 @@
 import React from 'react';
+import ReactMarkdown from 'react-markdown';
 import styles from '../page.module.css';
 
 interface SourceViewerProps {
@@ -16,8 +17,14 @@ export default function SourceViewer({ title, content, onClose }: SourceViewerPr
                     <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer' }}>×</button>
                 </div>
                 
-                <div style={{ flex: 1, overflowY: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.6, fontFamily: 'monospace', padding: '1rem', background: '#f9f9f9', borderRadius: 8 }}>
-                    {content}
+                <div style={{ flex: 1, overflowY: 'auto', lineHeight: 1.6, padding: '1rem', background: 'var(--surface)', borderRadius: 8 }}>
+                    {title.endsWith('.md') ? (
+                        <div className={styles.markdownContent}>
+                            <ReactMarkdown>{content}</ReactMarkdown>
+                        </div>
+                    ) : (
+                        <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', margin: 0 }}>{content}</pre>
+                    )}
                 </div>
             </div>
         </div>

@@ -42,7 +42,7 @@ export default function AddSourceModal({ onClose, onSave }: Props) {
         <div className={styles.modalOverlay} onClick={onClose}>
             <div className={styles.modalContent} onClick={e => e.stopPropagation()}>
                 <h2>Add Knowledge Source</h2>
-                <p style={{marginBottom: 16, color: '#666'}}>Teach Michio something new.</p>
+                <p style={{marginBottom: 16, color: '#666'}}>Teach Meechi something new.</p>
                 
                 <form onSubmit={handleSubmit}>
                     <div style={{marginBottom: 16}}>

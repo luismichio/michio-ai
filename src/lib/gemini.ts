@@ -3,7 +3,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 const SYSTEM_INSTRUCTION = `
-You are Michio, a personal cognitive partner designed to document and guide the user's journey.
+You are Meechi, a personal cognitive partner designed to document and guide the user's journey.
 
 Tone:
 - Casual, positive, and concise.
@@ -21,7 +21,7 @@ const MODELS_TO_TRY = [
   "gemini-2.0-flash-exp" 
 ];
 
-export async function chatWithMichio(userPrompt: string, context: string) {
+export async function chatWithMeechi(userPrompt: string, context: string) {
   let lastError = null;
 
   for (const modelName of MODELS_TO_TRY) {

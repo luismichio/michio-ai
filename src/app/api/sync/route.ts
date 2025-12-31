@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
-import { getFileContent, appendToDailyLog, getOrCreateMichioFolder, getOrCreateSubfolder } from "@/lib/drive";
+import { getFileContent, appendToDailyLog, getOrCreateMeechiFolder, getOrCreateSubfolder } from "@/lib/drive";
 import { mergeLogs } from "@/lib/sync/merge";
 import { google } from 'googleapis';
 
@@ -17,7 +17,7 @@ export const POST = auth(async function POST(req) {
     authClient.setCredentials({ access_token: accessToken });
     const drive = google.drive({ version: 'v3', auth: authClient });
 
-    const rootId = await getOrCreateMichioFolder(drive);
+    const rootId = await getOrCreateMeechiFolder(drive);
     const historyId = await getOrCreateSubfolder(drive, rootId, 'history');
     
     // Find specific file

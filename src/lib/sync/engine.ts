@@ -5,7 +5,7 @@ import { StorageProvider } from '../storage/types';
 
 const SYNC_TOKEN_KEY = 'drive_sync_token';
 // Changing root folder name to break legacy links and force fresh start
-const ROOT_FOLDER_NAME = 'Michio Journal Data';
+const ROOT_FOLDER_NAME = 'Meechi Journal Data';
 
 export class SyncEngine {
     private drive: GoogleDriveClient;
@@ -168,7 +168,7 @@ export class SyncEngine {
 
         if (parentId) {
             if (parentId === rootId) {
-                // Direct child of Michio Journal -> OK
+                // Direct child of Meechi Journal -> OK
                 parentPath = ''; // Root relative
             } else {
                 // Child of subfolder -> Check if we know the parent
@@ -464,7 +464,7 @@ export class SyncEngine {
                 rootId = folder.id;
                 console.log(`Created new root: ${rootId}`);
             } catch (e) {
-                console.error("Failed to create Michio Journal root", e);
+                console.error("Failed to create Meechi Journal root", e);
                 // Fallback? Rethrow?
                 throw e; 
             }

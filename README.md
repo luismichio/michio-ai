@@ -73,6 +73,17 @@ Meechi is built with the latest web technologies to ensure speed, privacy, and r
 
 ## 📜 Development Changelog
 
+### v0.9.0 - Rebranding & UI Polish (Dec 2025)
+*   **Complete Rebranding**: Officially transitioned all "Michio" references to **"Meechi"** across UI, Database, and System Prompts.
+*   **Typography Overhaul**:
+    *   **Headings**: Switched to **Lora** (Serif) for a warm, distinguished aesthetic.
+    *   **UI & Inputs**: Unified on **Inter** (Sans-serif) for maximum legibility.
+    *   **Markdown**: Added full markdown supporting via `react-markdown` (Bold, Italic, Lists) in both Chat and Source Viewer.
+*   **UX Enhancements**:
+    *   **Smart Explorer**: Topic Explorer now persists your folder state and automatically re-opens when closing a file (Back Navigation).
+    *   **Chat Layout**: Improved visual separation between User (Right) and Meechi (Left) messages.
+    *   **Legibility**: Standardized base font size to 16px with optimized line-height (1.6).
+
 ### v0.8.0 - The Meechi Rebrand (Dec 2025)
 *   **Identity**: Transitioned to "Meechi" with the Sage & Paper design language.
 *   **Typography**: Adopted Inter (Headings) and Merriweather (Content) for a book-like reading experience.

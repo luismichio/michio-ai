@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { google } from 'googleapis';
-import { getOrCreateMichioFolder, getOrCreateSubfolder } from "@/lib/drive";
+import { getOrCreateMeechiFolder, getOrCreateSubfolder } from "@/lib/drive";
 
 export const POST = auth(async function POST(req) {
   if (!req.auth) return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
@@ -13,7 +13,7 @@ export const POST = auth(async function POST(req) {
   const drive = google.drive({ version: 'v3', auth: authClient });
 
   try {
-    const rootId = await getOrCreateMichioFolder(drive);
+    const rootId = await getOrCreateMeechiFolder(drive);
     
     // Create Subfolders
     await getOrCreateSubfolder(drive, rootId, 'core');

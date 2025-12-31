@@ -100,7 +100,7 @@ export default function SettingsPage() {
                         style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} 
                         value={config.identity.tone}
                         onChange={e => updateIdentity('tone', e.target.value)}
-                        placeholder="Describe how Michio should speak..."
+                        placeholder="Describe how Meechi should speak..."
                     />
                 </div>
             </section>
@@ -312,7 +312,7 @@ export default function SettingsPage() {
                                 {session && <span style={badgeStyle}>Connected</span>}
                             </h3>
                             <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', color: '#666' }}>
-                                Only accessed when you explicitly ask Michio to read or write files.
+                                Only accessed when you explicitly ask Meechi to read or write files.
                             </p>
                         </div>
                         

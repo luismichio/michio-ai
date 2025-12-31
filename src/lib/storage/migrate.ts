@@ -40,7 +40,7 @@ export async function migrateFromIdbToDexie() {
 
         // Use bulkPut to overwrite/merge
         await db.files.bulkPut(recordsToInsert);
-        console.log(`[Michio] Migrated ${recordsToInsert.length} files to new storage.`);
+        console.log(`[Meechi] Migrated ${recordsToInsert.length} files to new storage.`);
 
     } catch (e) {
         console.warn("Migration check failed (safe to ignore if new user)", e);

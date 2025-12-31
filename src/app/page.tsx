@@ -3,6 +3,7 @@ import { useSession, signIn, signOut } from "next-auth/react";
 import { localLlmService } from "@/lib/ai/local-llm";
 import { AIChatMessage } from "@/lib/ai/types";
 import Link from 'next/link';
+import ReactMarkdown from 'react-markdown';
 import { useState, useRef, useEffect } from "react";
 import GuestJournal from './components/GuestJournal';
 import styles from './page.module.css';
@@ -36,6 +37,7 @@ export default function Home() {
   
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
+  const [returnToExplorer, setReturnToExplorer] = useState(false);
   const [isExplorerOpen, setIsExplorerOpen] = useState(false);
   const [viewingSource, setViewingSource] = useState<{title: string, content: string} | null>(null);
   
@@ -146,7 +148,7 @@ export default function Home() {
       
       // Notify Chat (System Message?) or just trigger Sync
       const timestamp = new Date().toLocaleTimeString();
-      const logEntry = `### ${timestamp}\n**Michio**: I have added *${fileName}* to the *${topic}* collection.\n`;
+      const logEntry = `### ${timestamp}\n**Meechi**: I have added *${fileName}* to the *${topic}* collection.\n`;
       await storage.appendFile(`history/${currentDate}.md`, logEntry);
       
       setMessages(prev => [...prev, { role: 'michio', content: `I have added *${fileName}* to the *${topic}* collection.` }]);
@@ -409,7 +411,7 @@ export default function Home() {
                     // Construct messages for local AI
                     const toolPrompt = `
 IMPORTANT INSTRUCTIONS:
-1. You are Michio, a helpful AI assistant.
+1. You are Meechi, a helpful AI assistant.
 2. You have access to these tools:
    - move_file(sourcePath, destinationPath)
    - create_file(filePath, content)
@@ -570,7 +572,7 @@ IMPORTANT INSTRUCTIONS:
                         }]);
 
                         // Save Log
-                        await storage.appendFile(`history/${currentDate}.md`, `**Michio**: ${confirmMsg}\n`);
+                        await storage.appendFile(`history/${currentDate}.md`, `**Meechi**: ${confirmMsg}\n`);
                      } catch (e: any) {
                          console.error("Tool Exec Error", e);
                          setMessages(prev => [...prev, { role: 'michio', content: `Failed to update file: ${e.message}`, timestamp: respTimestamp }]);
@@ -602,7 +604,7 @@ IMPORTANT INSTRUCTIONS:
                         usage: usageData ? { total_tokens: usageData.completion_tokens } : undefined
                     }]);
 
-                    await storage.appendFile(`history/${currentDate}.md`, `**Michio**: ${confirmMsg}\n`);
+                    await storage.appendFile(`history/${currentDate}.md`, `**Meechi**: ${confirmMsg}\n`);
                  } catch (e: any) {
                      console.error("Tool Exec Error", e);
                      setMessages(prev => [...prev, { role: 'michio', content: `Failed to create file: ${e.message}`, timestamp: respTimestamp }]);
@@ -632,7 +634,7 @@ IMPORTANT INSTRUCTIONS:
                         timestamp: respTimestamp,
                         usage: usageData ? { total_tokens: usageData.completion_tokens } : undefined
                     }]);
-                    await storage.appendFile(`history/${currentDate}.md`, `**Michio**: ${updateMsg}\n`);
+                    await storage.appendFile(`history/${currentDate}.md`, `**Meechi**: ${updateMsg}\n`);
 
                 } catch (e: any) {
                      console.error("Tool Settings Error", e);
@@ -690,7 +692,7 @@ IMPORTANT INSTRUCTIONS:
                      
                      const msg = `Moved *${finalSourcePath}* to *${args.destinationPath}*.`;
                      setMessages(prev => [...prev, { role: 'michio', content: msg, timestamp: respTimestamp }]);
-                     await storage.appendFile(`history/${currentDate}.md`, `**Michio**: ${msg}\n`);
+                     await storage.appendFile(`history/${currentDate}.md`, `**Meechi**: ${msg}\n`);
                  } catch (e: any) {
                      console.error("Move Error", e);
                      setMessages(prev => [...prev, { role: 'michio', content: `Failed to move file: ${e.message}`, timestamp: respTimestamp }]);
@@ -735,7 +737,7 @@ IMPORTANT INSTRUCTIONS:
                      
                      const msg = `Saved source from ${url} to *${destinationPath}*.`;
                      setMessages(prev => [...prev, { role: 'michio', content: msg, timestamp: respTimestamp }]);
-                     await storage.appendFile(`history/${currentDate}.md`, `**Michio**: ${msg}\n`);
+                     await storage.appendFile(`history/${currentDate}.md`, `**Meechi**: ${msg}\n`);
 
                  } catch (e: any) {
                      console.error("Fetch URL Error", e);
@@ -756,10 +758,10 @@ IMPORTANT INSTRUCTIONS:
             }]);
         }
         
-        // 4. Save Michio Response Locally (If we have text content)
+        // 4. Save Meechi Response Locally (If we have text content)
         // Check if responseText is valid and distinct from tool confirmation
         if (responseText && (!toolCalls || toolCalls.length === 0)) {
-            const michioEntry = `**Michio**: ${responseText}\n`;
+            const michioEntry = `**Meechi**: ${responseText}\n`;
             console.log("[Local AI] Saving response to history:", michioEntry.trim().substring(0, 50) + "...");
             await storage.appendFile(`history/${currentDate}.md`, michioEntry);
             console.log("[Local AI] History saved to", `history/${currentDate}.md`);
@@ -963,11 +965,15 @@ IMPORTANT INSTRUCTIONS:
                             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                             marginBottom: 4, fontSize: '0.75rem', opacity: 0.6 
                         }}>
-                             <strong>{msg.role === 'michio' ? 'Michio' : 'You'}</strong>
+                             <strong>{msg.role === 'michio' ? 'Meechi' : 'You'}</strong>
                              <span>{msg.timestamp}</span>
                         </div>
                         
-                        <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                        {msg.role === 'michio' ? (
+                            <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        ) : (
+                            <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                        )}
                         
                         {msg.usage && (
                             <div style={{ 
@@ -1070,7 +1076,7 @@ IMPORTANT INSTRUCTIONS:
                             handleChat(e as any);
                         }
                         }}
-                        placeholder="Message Michio... (Drag & Drop files)"
+                        placeholder="Message Meechi... (Drag & Drop files)"
                         className={styles.chatInput}
                         rows={1}
                     />
@@ -1104,14 +1110,28 @@ IMPORTANT INSTRUCTIONS:
       )}
 
       {isExplorerOpen && (
-        <FileExplorer storage={storage} onClose={() => setIsExplorerOpen(false)} syncLogs={syncLogs} onOpenFile={handleOpenFile} />
+        <FileExplorer 
+            storage={storage} 
+            onClose={() => setIsExplorerOpen(false)} 
+            syncLogs={syncLogs} 
+            onOpenFile={(path) => {
+                handleOpenFile(path);
+                setReturnToExplorer(true);
+            }} 
+        />
       )}
 
       {viewingSource && (
         <SourceViewer 
             title={viewingSource.title} 
             content={viewingSource.content} 
-            onClose={() => setViewingSource(null)} 
+            onClose={() => {
+                setViewingSource(null);
+                if (returnToExplorer) {
+                    setIsExplorerOpen(true);
+                    setReturnToExplorer(false);
+                }
+            }} 
         />
       )}
 

@@ -22,7 +22,7 @@ export interface FileChunk {
     embedding: number[]; // 512 dimensions (TensorFlow.js Universal Sentence Encoder)
 }
 
-export class MichioDB extends Dexie {
+export class MeechiDB extends Dexie {
     files!: Table<FileRecord>;
     settings!: Table<SettingRecord>;
     chunks!: Table<FileChunk>;
@@ -55,4 +55,4 @@ export class MichioDB extends Dexie {
     }
 }
 
-export const db = new MichioDB();
+export const db = new MeechiDB();

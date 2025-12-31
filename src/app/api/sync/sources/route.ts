@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
-import { getFileContent, getOrCreateMichioFolder, getOrCreateSubfolder, listFilesInFolder } from "@/lib/drive";
+import { getFileContent, getOrCreateMeechiFolder, getOrCreateSubfolder, listFilesInFolder } from "@/lib/drive";
 import { google } from 'googleapis';
 
 // Helper to get authorized drive client
@@ -47,7 +47,7 @@ export const POST = auth(async function POST(req) {
         const drive = await getDrive(req);
 
         // Get 'misc' folder ID
-        const rootId = await getOrCreateMichioFolder(drive);
+        const rootId = await getOrCreateMeechiFolder(drive);
         const miscId = await getOrCreateSubfolder(drive, rootId, 'misc');
         
         let targetId = miscId;

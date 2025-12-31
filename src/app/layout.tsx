@@ -2,26 +2,26 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Michio | Man on a Journey',
+  title: 'Meechi | Your Wise Peer',
   description: 'A journal for the wandering soul.',
 };
 
 import { AuthProvider } from './components/AuthProvider';
 
-import { Inter, Merriweather } from 'next/font/google';
+import { Inter, Lora } from 'next/font/google';
 import { ThemeProvider } from '@/providers/theme-provider';
 
 const inter = Inter({ 
-  subsets: ['latin'],
+  subsets: ['latin', 'cyrillic'],
   variable: '--font-inter',
   display: 'swap',
 });
 
-const merriweather = Merriweather({
-  weight: ['300', '400', '700', '900'],
+const lora = Lora({
+  weight: ['400', '500', '600', '700'],
   style: ['normal', 'italic'],
-  subsets: ['latin'],
-  variable: '--font-merriweather',
+  subsets: ['latin', 'cyrillic'],
+  variable: '--font-lora',
   display: 'swap',
 });
 
@@ -31,8 +31,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.variable} ${merriweather.variable}`} suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={`${inter.variable} ${lora.variable}`}>
+      <body suppressHydrationWarning>
         <ThemeProvider
             attribute="class"
             defaultTheme="system"

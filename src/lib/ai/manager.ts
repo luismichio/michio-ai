@@ -49,7 +49,7 @@ export class AIManager {
         // Inject Identity/Tone into System Prompt
         const identity = config.identity || { name: "Traveler", tone: "Casual" };
         const systemPrompt = `
-You are Michio, a personal cognitive partner.
+You are Meechi, a personal cognitive partner.
 User Name: ${identity.name}
 Tone: ${identity.tone}
 

@@ -15,7 +15,16 @@ interface FileExplorerProps {
 
 export default function FileExplorer(props: FileExplorerProps) {
     const { storage, onClose, onOpenFile } = props;
-    const [currentPath, setCurrentPath] = useState('misc');
+    const [currentPath, setCurrentPath] = useState(() => {
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem('meechi_explorer_path') || 'misc';
+        }
+        return 'misc';
+    });
+
+    useEffect(() => {
+        localStorage.setItem('meechi_explorer_path', currentPath);
+    }, [currentPath]);
     
     // Actions State
     const [isUploading, setIsUploading] = useState(false);
@@ -671,7 +680,7 @@ export default function FileExplorer(props: FileExplorerProps) {
 
                     <div style={{ flex: 1 }} />
                     <button onClick={async () => {
-                        if (confirm("Reset connection to Google Drive? This will re-upload all files to 'Michio Journal'.")) {
+                        if (confirm("Reset connection to Google Drive? This will re-upload all files to 'Meechi Journal'.")) {
                             await storage.resetSyncState();
                             alert("Sync Reset. Please Sign Out and Sign In again to refresh permissions.");
                         }
@@ -994,7 +1003,7 @@ export default function FileExplorer(props: FileExplorerProps) {
                                     const code = prompt("Type 'DELETE' to confirm Factory Reset. This wipes ALL local data.");
                                     if (code === 'DELETE') {
                                         await storage.factoryReset();
-                                        alert("Michio has been factory reset. Reloading...");
+                                        alert("Meechi has been factory reset. Reloading...");
                                         window.location.reload();
                                     }
                                 }} style={{ padding: '4px 8px', color: 'white', background: 'red', fontWeight: 'bold', border: '1px solid darkred' }}>
