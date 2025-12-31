@@ -1,182 +1,113 @@
-# Mich.io 🧠✨
+# Meechi 🧠🌿
 
-**Mich.io** is the extension of your own cognitive capabilities. It is part of your consciousness. It is designed to document and guide your unique journey. Inspired by the Japanese concept of *Michio*—meaning "Man on a Journey" or "Wise Path"—this platform transforms fragmented daily data into a continuous narrative of personal growth. It acts as an empathetic cognitive layer that connects your research, health data, and daily journals into one fluid conversation.
+**Meechi** is a private cognitive layer designed to walk beside you, not just work for you. Unlike traditional "assistants" that perform tasks, Meechi is a **Travel Partner**—a wise peer that documents your unique journey, connects your fragmented thoughts, and helps you navigate life with clarity.
 
-Privacy first. No data is sent to Mich.io servers. All data is stored locally on your device, or in your chosen services you already trust. 
+> **Privacy First**: Your thoughts belong to you. Meechi runs locally. No data is sent to our servers.
+> **Bring Your Own Brain**: Connect your own AI (Gemini/Groq) and Storage (Google Drive) for complete control.
 
-## 🌟 The Philosophy: Your Journey, Documented
-Life is a series of paths. Mich.io ensures that no insight, health milestone, or creative spark is lost along the way.
-- **The Journal is the Path:** Unlike static databases, Mich.io treats your entries as a "Ship's Log," keeping you on track and helping you navigate towards your personal goals.
-- **Wisdom through Reflection:** By mirroring your innermost feelings and aspirations, Mich.io provides the clarity needed to navigate life's complexities.
+---
 
-Unlike traditional assistants, Mich.io is built on the Bring Your Own (BYO) principle. 
-- Your Brain Use your own AI API keys.
-- Your Memory Connect your personal Notion, Google Drive, and Fitbit data, etc.
-- Your Soul A high-fidelity, multimodal interface designed for deep, human-like interaction.
+## 🌿 The Philosophy: Paper, Sage, and Soul
+
+In a digital world of stark screens and cold logic, Meechi offers a sanctuary.
+-   **Paper & Sage**: The interface is grounded in the organic tones of warm paper (#F9F7F2) and calming sage (#6B8E6B), creating a space where long-form writing feels natural and safe.
+-   **The Wise Peer**: Meechi doesn't just output data; it mirrors your tone, asks thoughtful questions, and helps you untangle the knots in your mind.
+-   **Journal as a Roadmap**: Every entry is a data point on your map. By documenting the "now," you create a compass for the "next."
+
+---
+
+## 🏗️ Local-First Architecture
+
+Meechi is built on a **Local-First** philosophy. Your device is the source of truth, ensuring zero-latency journaling and total privacy. Cloud sync is purely for backup and multi-device continuity.
+
+```mermaid
+graph LR
+    User[User] -->|Writes/Chats| UI[Meechi UI]
+    UI -->|Stores| DB[(Dexie.js / IndexedDB)]
+    
+    subgraph "Local Cognitive Device"
+    UI
+    DB
+    RAG[TensorFlow.js RAG Engine]
+    LocalAI[WebLLM (Llama 3)]
+    end
+    
+    DB <-->|Syncs (Background)| Drive[Google Drive / Cloud]
+    RAG -->|Indexes| DB
+    UI <-->|Queries| LocalAI
+```
+
+---
 
 ## 🚀 Journey-Centric Features
-- **Proactive Journaling:** Mich.io doesn't just wait for you to type; it can prompt reflections based on your day's data.
-- **Local RAG (Semantic Search):**  
-  Mich.io processes your knowledge base **entirely on-device** using TensorFlow.js and the Universal Sentence Encoder.
-  - **Private:** Your massive notes library is indexed locally; no data leaves your browser.
-  - **Efficient:** Reduces AI token usage by 75% by sending only the most relevant ~2k characters to the LLM.
-  - **Fast:** Indexing runs in a background Web Worker for zero UI lag.
-- **Offline-First Architecture:** Built on Dexie.js (IndexedDB). You can journal, search, and browse your history without an internet connection. Data syncs to Google Drive when you're back online.
-- **The "Wisdom" Layer:** Uses a large context model (Groq/Llama 3) to synthesize your past experiences, helping you see long-term patterns.
-- **File Explorer:** A robust UI for managing your "Memory" (Google Drive files) with drag-and-drop, bulk moves, and rename capabilities.
-- **Journey Map:** A calendar-based history view to revisit past entries and track your consistency.
+
+### 🔒 Private Cognitive Layer
+-   **Local RAG**: Your entire knowledge base is indexed natively in the browser using **TensorFlow.js**.
+-   **Zero-Data Leak**: Search happens on-device. Your massive library of notes is never sent to a third-party vector DB.
+
+### ✍️ Proactive Journaling
+-   **Auto-Summarization**: Uploaded PDFs and messy notes are automatically distilled into concise "anchors" for the AI, keeping context windows efficient.
+-   **The "Rolling Window"**: Meechi remembers the flow of your day, maintaining a 6-hour conversational context so you never have to repeat yourself.
+
+### 📂 The Memory System
+-   **Topic Explorer**: A "Windows-like" file manager for your cloud storage, supporting drag-and-drop organization.
+-   **Journey Map**: A calendar tracking your consistency and providing a visual history of your path.
+
+---
 
 ## 🛠 Tech Stack
-- **Framework**: Next.js 16 (Turbopack)
-- **Storage Strategy**: **Local First** (Dexie.js / IndexedDB). Core functionality works 100% locally.
-- **Sync Module**: Google Drive Sync (Background Worker with ID-based logic).
-- **AI Engine**: Groq (Llama 3.3 70B) for reasoning.
-- **Embedding Engine**: TensorFlow.js + Universal Sentence Encoder (Local Web Worker). RAG is done locally.
-- **Protocol**: MCP (Model Context Protocol) ready.
 
-## UI Components
-- **Main Interface**: Clean, dual-mode input (Voice/Text) with live streaming responses.
-- **File Explorer**: Windows-like file management for your cloud storage.
-- **Calendar View**: "Journey Map" for navigating your journal history.
-- **PDF Reader**: Built-in parsing for uploading and chatting with PDF documents.
+Meechi is built with the latest web technologies to ensure speed, privacy, and robustness.
 
----
-I'm Mich.io. I'm here. What are we working on today
-
-## The "Mich" Nickname Strategy
-
-To emphasize the personal nature of the journey, users can "name" their companion. This shifts the relationship from a tool to a **travel partner**.
-
-| Name Variation | Persona Emphasis | Best For... |
-| --- | --- | --- |
-| **Michio** | The Formal Guide | Deep research sessions and strategic planning. |
-| **Mich** | The Daily Peer | Quick voice notes and on-the-go reflections while walking. |
-| **Mic/Mitch** | The Casual Buddy | Informal brainstorming and "messy" data dumps. |
-
----
-
-## 3. The "Journal as a Roadmap" Concept
-
-In Mich.io, a journal entry is more than text; it is a **data-point on a map**.
-
-1. **Reflection as a Mirror:** The journal serves as a mirror, reflecting innermost feelings and challenges to gain clarity.
-2. **Tracking Progress:** By documenting the journey, users create a roadmap for success, celebrating milestones and adjusting their course as needed.
-3. **Untangling the Knot:** Journaling helps "untangle the knot in the mind," taking the unprocessed "raw material" of daily experience and making sense of it.
-
----
-
-## 4. Initial Roadmap: The "Mich.io Journey"
-
-* **Milestone 1: The First Step (UI).** A minimal, distraction-free journaling interface that feels like a quiet space for a conversation with oneself.
-* **Milestone 2: The proof of concept (PoC).** 
-    - a. Integrate Gemini 1.53 Pro live conversation
-    - b. Integrate Google Drive API for file storage
-    - c. Goal is to be able to add daily entries, and able ask questions like NotebookLM using data from the file storage.
-* **Milestone 3: The Wise Companion (AI).** Implementing the "Reflection" engine that asks the user questions like, *"What challenges did we face today, and how did we overcome them?"*.
-* **Milestone 4: The Gateway (Month 2).** Finalize the "Guest-to-Pro" migration tool, ensuring no data is lost when a user moves from local to cloud storage.
-* **Milestone 5: The Market (Month 3).** Launch the first three "Premium Connectors" (e.g., *Mich.io for Longevity*, *Mich.io for Academic Research*) to test subscription appetite.
-* **Milestone 6: The Map Maker (Integration).** Connecting Fitbit data so that physical health becomes a background layer of the journal.
-
-This section outlines the strategic "Onboarding Path" for **Mich.io**, transforming it from a simple tool into a lifelong companion, while detailing a profitable "Bring Your Own" (BYO) business model.
-
----
-
-## **1. The Onboarding Path: From Guest to Sage**
-
-The onboarding for Mich.io is not a setup wizard; it is the **First Mile** of the user's journey. By using a "Gradual Complexity" model, we ensure non-tech users feel supported while power users find the depth they crave.
-
-### **Phase A: The Casual Encounter (Guest Mode)**
-
-* **The Zero-Friction Entry:** No Google account or API keys required. Users enter a "Local Sandbox" where Mich.io uses a built-in, developer-funded "Guest Engine" (e.g., Llama 3 via Groq).
-* **The Experience:** Users can engage in **Live Conversation** immediately. Mich.io introduces itself: *"I'm Mich.io. For now, I'm staying right here on your device to keep our first steps private"*.
-* **Data Handling:** All journals and logs are saved as local `.md` and `.csv` files in the browser's memory.
-
-### **Phase B: The Integrated Path (Full Setup)**
-
-* **The Transition:** Once the user reaches a "Milestone" (e.g., 5 journal entries or 3 saved recipes), Mich.io suggests an upgrade: *"We've built a great roadmap here. Should we move this to your Google Drive so I can start connecting the dots with your research?"*.
-* **Guided Connection:**
-* **The Brain:** A 1-click guide to getting a Gemini API Key.
-* **The Memory:** OAuth "Login with Google/Notion" buttons that hide the technical complexity of MCP servers.
-
-
-* **The Result:** Mich.io now has the **2M context window** to act as a "Research Buddy," analyzing years of data instead of just the current session.
-
----
-
-## **2. Profitable Business Models for Mich.io**
-
-Because Mich.io uses a **BYO (Bring Your Own)** architecture, your overhead is remarkably low—you don't pay for the user's AI processing or data storage. This allows for highly profitable, high-margin revenue streams.
-
-### **A. The "Freemium Plus" Model (Direct)**
-
-* **Free Tier:** Access to the Mich.io UI, local storage, and the limited Guest Engine.
-* **Mich.io Pro Subscription ($5-$10/mo):** This is your main "Soul" license.
-* Unlocks the **Pro Persona** (more advanced empathetic coaching).
-* Unlocks **Premium MCP Connectors** (e.g., specialized integrations for medical research, fitness deep-dives, or financial logs).
-* Provides **Sync Cloud Storage** (managed backup of their local SQLite logs).
-
-
-
-### **B. The "Connector Marketplace" (Indirect)**
-
-* **Platform Fee:** As Mich.io grows, third-party developers can build specialized "Journey Maps" or "MCP Servers" (e.g., a "Gourmet Chef" MCP that connects to specific grocery APIs).
-* **Commission:** You take a small percentage of every "Tool" or "Plugin" a user subscribes to within the Mich.io interface.
-
-### **C. White-Labeling for "Wisdom Industries" (B2B)**
-
-* **The Licensing Play:** Sell the Mich.io architecture to therapist groups, executive coaches, or fitness retreats.
-* **Customized Journeys:** They provide their own "Wise Companion" prompts and data sinks, while you provide the "Mich.io" infrastructure as a service (SaaS).
-
-### **D. Strategic Growth: Comparison of Margins**
-
-| Expense Category | Traditional AI App | **Mich.io (BYO)** |
-| --- | --- | --- |
-| **Inference (LLM) Cost** | High (You pay for every word). | **Zero** (User pays Google/OpenAI). |
-| **Storage Cost** | High (You host the data). | **Zero** (Stored in User's Drive/Notion). |
-| **User Lifetime Value** | Low (Thin margins). | **High** (Pure profit on the software license). |
+| Component | Technology | Role |
+| :--- | :--- | :--- |
+| **Framework** | **Next.js 16** (Turbopack) | The React framework for the web. |
+| **Storage** | **Dexie.js** (IndexedDB) | Local-first synchronous database. |
+| **Sync** | Google Drive API | Background worker for cloud backup. |
+| **Vectors** | **TensorFlow.js** + USE | In-browser semantic search (Local RAG). |
+| **Local AI** | **WebLLM** (MLC-AI) | Client-side Llama 3 inference (WebGPU). |
+| **Server AI** | Vercel AI SDK (Gemini/Groq) | Optional cloud fallback for heavy reasoning. |
+| **Styling** | **Tailwind CSS v3** | variables-based theming engine. |
 
 ---
 
 ## 📜 Development Changelog
 
-See [CHANGELOG.md](./CHANGELOG.md) for full history.
+### v0.8.0 - The Meechi Rebrand (Dec 2025)
+*   **Identity**: Transitioned to "Meechi" with the Sage & Paper design language.
+*   **Typography**: Adopted Inter (Headings) and Merriweather (Content) for a book-like reading experience.
+*   **Local Intelligence**: Fully stabilized WebGPU-based Local AI implementation with auto-crash recovery on GPU context loss.
+*   **Theme Engine**: Implemented `next-themes` with a reliable light/dark mode toggle.
 
-### v0.2.0 - User Customization & Gemini Integration (Dec 2025)
-*   **Gemini AI Support**: Added Google Gemini as a fallback and alternative AI provider.
-*   **Settings UI**: New configuration page for managing Identity (Name, Tone) and AI Providers.
-*   **Conversational Onboarding**: New users are greeted by Michio and can set their preferences via natural language.
-*   **Tool Calling**: Implemented basic tool execution for Gemini (e.g., updating settings via chat).
-*   **Architecture**: Refactored `AIManager` to support multiple providers and fallback logic.
-
-### v0.7.0 - The "Agentic" Upgrade (Dec 2025)
+### v0.7.0 - The Agentic Upgrade (Dec 2025)
 *   **AI Agency**:
-    *   **File Creation & Editing**: Michio can now create, edit, and organize notes directly via chat (e.g., "Create a shopping list folder").
+    *   **File Creation & Editing**: Meechi can now create, edit, and organize notes directly via chat (e.g., "Create a shopping list folder").
     *   **Tool Usage**: Implemented a robust "Tool Calling" loop where the AI requests actions (Create/Update) and the client executes them securely.
 *   **Auto-Summarization**:
     *   **Smart Ingestion**: Uploaded PDFs and text files are automatically summarized by a smaller LLM call, creating concise "anchors" for better RAG retrieval.
     *   **Dynamic Updates**: Edited files are re-summarized on the fly to keep the Knowledge Base fresh.
-*   **Refined UX**:
-    *   **Custom Modals**: Replaced intrusive browser alerts with custom, theme-consistent Modal dialogs for errors and confirmations.
-    *   **Robust Error Handling**: Improved binary file handling and "empty file" states in the viewer.
 
 ### v0.6.0 - The "Rolling Context" (Dec 2025)
-*   **Rolling Window Context**: Replaced the static "Daily Log" context with a valid dynamic "6-Hour Rolling Window". This ensures Michio remembers conversations across midnight and keeps the context window efficient.
-*   **Context Transparency**: Added real-time Token Counters (Session Total & Per-Message) to help users track AI usage and cost.
+*   **Rolling Window Context**: Replaced static "Daily Log" context with a dynamic "6-Hour Rolling Window". This ensures conversation memory persists across midnight while optimizing token usage.
+*   **Context Transparency**: Added real-time Token Counters (Session Total & Per-Message).
 *   **UX Polish**:
-    *   **Auto-Expanding Chat**: The input box now grows with your text (like a modern messenger).
-    *   **Timestamps**: Every message now displays its precise timestamp.
-    *   **Load More**: Chat history renders efficiently, loading only recent messages with a button to fetch older ones.
+    *   **Auto-Expanding Chat**: Input box grows with content.
+    *   **Timestamps**: Precise messaging timing.
+    *   **Load More**: Efficient pagination for long chat histories.
 
-### v0.5.0 - The "Stabilization" Update (Dec 2025)
-*   **Local RAG Stabilization**: Switched from `@huggingface/transformers` to **TensorFlow.js** + Universal Sentence Encoder.
-    *   *Why?* The Transformers.js library (WASM) caused persistent initialization crashes in the Next.js 16 / Turbopack environment, specifically within Web Workers. TensorFlow.js provides native JS/WebGL support, ensuring vastly superior stability and build reliability while maintaining 75% token reduction efficiency.
-*   **Authentication & Sync**: Fixed critical "Split Brain" issues where local and cloud states would diverge. Implemented ID-based sync logic to robustly handle folder moves and renames.
-*   **Offline-First**: Re-architected storage to use Dexie.js (IndexedDB) as the source of truth, treating Google Drive purely as a backup/sync target.
-*   **UI Enhancements**: Added File Explorer (Drag & Drop), Journey Map (Calendar), and PDF Parsing.
+### v0.5.0 - Local-First Stabilization (Dec 2025)
+*   **TensorFlow.js Migration**: Moved RAG engine from Transformers.js to **TensorFlow.js** + Universal Sentence Encoder.
+    *   *Why?* Native JS/WebGL support ensures superior stability and build reliability in Next.js 16/Turbopack, preventing Web Worker crashes.
+*   **Splinter-Proof Sync**: Implemented ID-based synchronization logic to robustly handle folder moves and renames between Local DB and Google Drive.
+*   **Offline-First**: Re-architected storage to use Dexie.js (IndexedDB) as the source of truth.
 
-### v0.1.0 - The "Genesis" (Dec 2025)
-*   **Core Setup**: Initialized Next.js 16 app with "Man on a Journey" theme.
-*   **Guest Mode**: Implemented local-only usage for privacy.
-*   **Cloud Integration**: Added Google Drive scope via NextAuth for optional cloud sync.
-*   **AI Integration**: Connected Groq (Llama 3) for the conversational "Wisdom" layer.
+### v0.2.0 - Customization & Gemini (Dec 2025)
+*   **Gemini AI Support**: Added Google Gemini as a fallback AI provider.
+*   **Conversational Onboarding**: New users are greeted by Meechi and can set preferences naturally.
+*   **Settings UI**: Configuration page for Identity (Name, Tone).
 
+### v0.1.0 - The Genesis (Dec 2025)
+*   **Core Setup**: Initialized Next.js 16 app.
+*   **Guest Mode**: Local-only usage for privacy.
+*   **Cloud Integration**: Google Drive OAuth via NextAuth.
+*   **AI Integration**: Groq (Llama 3) connection.

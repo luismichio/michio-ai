@@ -15,10 +15,16 @@ export interface UserIdentity {
     tone: string; // e.g. "Casual", "Formal", "Pirate"
 }
 
+export interface LocalAIConfig {
+    enabled: boolean;
+    model: string;
+}
+
 export interface AppConfig {
     identity: UserIdentity;
     providers: AIProviderConfig[];
     activeProviderId: string;
+    localAI: LocalAIConfig;
     theme: 'light' | 'dark' | 'system';
 }
 
@@ -36,6 +42,10 @@ const DEFAULT_CONFIG: AppConfig = {
         }
     ],
     activeProviderId: 'groq',
+    localAI: {
+        enabled: true,
+        model: 'Llama-3.1-8B-Instruct-q4f32_1-MLC'
+    },
     theme: 'system'
 };
 
@@ -56,7 +66,12 @@ export class SettingsManager {
             }
             const parsed = JSON.parse(content);
             // Merge with default to ensure new fields are present
-            return { ...DEFAULT_CONFIG, ...parsed, identity: { ...DEFAULT_CONFIG.identity, ...parsed.identity } };
+            return { 
+                ...DEFAULT_CONFIG, 
+                ...parsed, 
+                identity: { ...DEFAULT_CONFIG.identity, ...parsed.identity },
+                localAI: { ...DEFAULT_CONFIG.localAI, ...parsed.localAI } 
+            };
         } catch (e) {
             console.warn("Failed to load config, returning default", e);
             return DEFAULT_CONFIG;

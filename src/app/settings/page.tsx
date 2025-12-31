@@ -10,9 +10,11 @@ export default function SettingsPage() {
     const [config, setConfig] = useState<AppConfig | null>(null);
     const [loading, setLoading] = useState(true);
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+    const [gpuSupported, setGpuSupported] = useState<boolean | null>(null);
 
     // Ensure storage is ready
     const [storage] = useState(() => new LocalStorageProvider());
+
 
     useEffect(() => {
         async function load() {
@@ -20,6 +22,13 @@ export default function SettingsPage() {
             const cfg = await settingsManager.getConfig();
             setConfig(cfg);
             setLoading(false);
+            
+            // Check WebGPU
+            if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
+                setGpuSupported(true);
+            } else {
+                setGpuSupported(false);
+            }
         }
         load();
     }, [storage]);
@@ -50,6 +59,14 @@ export default function SettingsPage() {
         setConfig({
             ...config,
             providers: config.providers.map(p => p.id === id ? { ...p, ...updates } : p)
+        });
+    };
+
+    const updateLocalAI = (updates: Partial<{ enabled: boolean; model: string }>) => {
+        if (!config) return;
+        setConfig({
+            ...config,
+            localAI: { ...config.localAI, ...updates }
         });
     };
 
@@ -207,6 +224,78 @@ export default function SettingsPage() {
                                 Get API Key →
                             </a>
                         </div>
+                    </div>
+                </div>
+
+            </section>
+
+            <section style={sectionStyle}>
+                <h2 style={headerStyle}>Local AI (Fallback)</h2>
+                <div style={cardStyle}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                        <div>
+                             <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                WebLLM (In-Browser)
+                            </h3>
+                            <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', color: '#666' }}>
+                                Runs locally on your GPU when cloud providers fail.
+                                <br />
+                                <strong>Note:</strong> Requires ~4GB download on first use.
+                            </p>
+                        </div>
+                       
+                        <label className="switch" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem' }}>
+                             Enabled
+                             <input 
+                                type="checkbox" 
+                                checked={config.localAI?.enabled ?? true} 
+                                onChange={e => updateLocalAI({ enabled: e.target.checked })}
+                             />
+                        </label>
+                        <label className="switch" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem' }}>
+                             Enabled
+                             <input 
+                                type="checkbox" 
+                                checked={config.localAI?.enabled ?? true} 
+                                onChange={e => updateLocalAI({ enabled: e.target.checked })}
+                                disabled={gpuSupported === false}
+                             />
+                        </label>
+                    </div>
+
+                    {gpuSupported === false && (
+                        <div style={{ background: '#fef2f2', color: '#991b1b', padding: '0.75rem', borderRadius: 6, marginBottom: '1rem', fontSize: '0.85rem', display: 'flex', gap: 8 }}>
+                            <span>⚠️</span>
+                            <div>
+                                <strong>WebGPU Not Supported</strong><br/>
+                                Your browser or device does not support WebGPU, which is required for running Local AI. Please switch to a compatible browser (e.g., Chrome 113+, Edge 113+).
+                            </div>
+                        </div>
+                    )}
+
+                    {gpuSupported === true && (
+                        <div style={{ marginBottom: '1rem' }}>
+                            <span style={{ fontSize: '0.8rem', background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: 4 }}>
+                                ✅ Device Compatible (WebGPU Detected)
+                            </span>
+                        </div>
+                    )}
+
+                    <div style={fieldGroupStyle}>
+                        <label style={labelStyle}>Model</label>
+                        <select 
+                            style={inputStyle} 
+                            value={config.localAI?.model || 'Llama-3.1-8B-Instruct-q4f32_1-MLC'}
+                            onChange={e => updateLocalAI({ model: e.target.value })}
+                        >
+                            <option value="Llama-3.1-8B-Instruct-q4f32_1-MLC">Llama 3.1 8B Instruct (Recommended)</option>
+                            <option value="Llama-3-8B-Instruct-q4f32_1-MLC">Llama 3 8B Instruct</option>
+                            <option value="Hermes-2-Pro-Llama-3-8B-q4f16_1-MLC">Hermes 2 Pro Llama 3 8B</option>
+                            <option value="Phi-3-mini-4k-instruct-q4f16_1-MLC">Phi 3 Mini 4k</option>
+                        </select>
+                         <p style={{ fontSize: '0.8rem', color: '#666', marginTop: 4 }}>
+                            Select a model optimized for your device capabilities.
+                        </p>
                     </div>
                 </div>
             </section>

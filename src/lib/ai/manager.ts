@@ -67,35 +67,14 @@ ${systemContext}
             { role: 'user', content: userMessage }
         ];
 
-        // 3. Attempt Chat with Fallback
-        try {
-            return await provider.chat(
-                providerConfig?.model || "",
-                messages,
-                tools,
-                providerConfig?.apiKey
-            );
-        } catch (error) {
-            console.error(`Error with provider ${provider.id}:`, error);
-            
-            // Fallback Logic
-            if (provider.id === 'groq') {
-                 console.log("Attempting Fallback to Gemini...");
-                 const fallbackProvider = this.providers.get('gemini');
-                 const fallbackConfig = config.providers.find(p => p.id === 'gemini');
-                 
-                 if (fallbackProvider) {
-                     return await fallbackProvider.chat(
-                         fallbackConfig?.model || "",
-                         messages,
-                         tools, 
-                         fallbackConfig?.apiKey
-                     );
-                 }
-            }
-            
-            throw error;
-        }
+        // 3. Attempt Chat
+        // We throw errors to let the client handle fallback (e.g. Local AI)
+        return await provider.chat(
+            providerConfig?.model || "",
+            messages,
+            tools,
+            providerConfig?.apiKey
+        );
     }
 }
 

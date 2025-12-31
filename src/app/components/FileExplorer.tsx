@@ -32,8 +32,65 @@ export default function FileExplorer(props: FileExplorerProps) {
         | { type: 'alert', title: string, message: string, onConfirm?: () => void };
     const [dialogAction, setDialogAction] = useState<DialogAction | null>(null);
 
+    // Link Dialog State
+    const [isLinkDialogOpen, setIsLinkDialogOpen] = useState(false);
+    const [linkUrl, setLinkUrl] = useState("");
+    const [isFetchingLink, setIsFetchingLink] = useState(false);
+
     const showAlert = (title: string, message: string, onConfirm?: () => void) => {
         setDialogAction({ type: 'alert', title, message, onConfirm });
+    };
+
+    const handleAddLink = async () => {
+        if (!linkUrl) return;
+        setIsFetchingLink(true);
+        try {
+            const res = await fetch('/api/utils/fetch-url', {
+                method: 'POST',
+                body: JSON.stringify({ url: linkUrl }),
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.message);
+
+            // Create file
+            const safeTitle = data.title.replace(/[^a-zA-Z0-9 \-_]/g, '').trim() || 'Untitled Source';
+            const fileName = `${safeTitle}.source.md`;
+            const path = `${currentPath}/${fileName}`;
+
+            // Add Summary Wrapper if content is long? 
+            // The prompt says: "create a md file with the parsed text, and summary in the beggining"
+            
+            // Generate Summary
+            let finalContent = data.content;
+            try {
+                const sumRes = await fetch('/api/ai/summarize', {
+                    method: 'POST',
+                    body: JSON.stringify({ content: data.content }),
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const sumData = await sumRes.json();
+                if (sumData.summary) {
+                    finalContent = `> **Summary**: ${sumData.summary}\n\n> **Source**: ${linkUrl}\n\n---\n\n${data.content}`;
+                } else {
+                     finalContent = `> **Source**: ${linkUrl}\n\n---\n\n${data.content}`;
+                }
+            } catch (e) {
+                console.error("Summary failed", e);
+                 finalContent = `> **Source**: ${linkUrl}\n\n---\n\n${data.content}`;
+            }
+
+            await storage.saveFile(path, finalContent);
+            
+            setIsLinkDialogOpen(false);
+            setLinkUrl("");
+            showAlert("Success", "Link added successfully!");
+
+        } catch (e: any) {
+            alert("Failed to add link: " + e.message);
+        } finally {
+            setIsFetchingLink(false);
+        }
     };
 
     // Initial Migration Trigger
@@ -150,7 +207,7 @@ export default function FileExplorer(props: FileExplorerProps) {
     };
 
     const handleCreateFolder = async () => {
-        const name = prompt("Folder Name:");
+        const name = prompt("Topic Name:");
         if (!name) return;
         
         // Explicitly create folder record for sync
@@ -158,11 +215,8 @@ export default function FileExplorer(props: FileExplorerProps) {
         await storage.createFolder(path);
     };
 
-    const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        
-        const path = `${currentPath}/${file.name}`;
+    const processFile = async (file: File, targetPath: string) => {
+        const path = `${targetPath}/${file.name}`;
         
         let content = "";
         if (file.type.startsWith('text/') || file.name.endsWith('.md') || file.name.endsWith('.txt')) {
@@ -170,10 +224,8 @@ export default function FileExplorer(props: FileExplorerProps) {
         } else if (file.type === 'application/pdf') {
              try {
                 const buffer = await file.arrayBuffer();
-                // Clone buffer for extraction so original isn't detached
                 const extractedText = await extractTextFromPdf(buffer.slice(0));
                 
-                // 1. Generate Summary
                 let finalContent = `## Source: ${file.name}\n\n${extractedText}`;
                 try {
                     const res = await fetch('/api/ai/summarize', {
@@ -189,26 +241,20 @@ export default function FileExplorer(props: FileExplorerProps) {
                     console.error("Auto-summary failed", e);
                 }
                 
-                // 2. Create Shadow Source
                 const sourcePath = `${path}.source.md`;
                 await storage.saveFile(sourcePath, finalContent);
-                
-                // 2. Save "Raw" PDF Binary (Local-First)
-                // Now that storage supports binary, we save the full PDF.
                 await storage.saveFile(path, buffer);
-                
-                return; // Done
+                return;
              } catch (e) {
                  console.error("PDF Upload Trace", e);
                  alert("Failed to parse PDF");
                  return;
              }
         } else {
-             alert("Only text/markdown/pdf files supported");
+             alert(`Skipped ${file.name}: Only text/markdown/pdf supported`);
              return;
         }
 
-        // Standard Text Save
         let finalContent = content;
         try {
             const res = await fetch('/api/ai/summarize', {
@@ -225,6 +271,12 @@ export default function FileExplorer(props: FileExplorerProps) {
         }
 
         await storage.saveFile(path, finalContent);
+    };
+
+    const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        await processFile(file, currentPath);
     };    // loadFiles(); // Removed: Reactive
     
 
@@ -502,7 +554,19 @@ export default function FileExplorer(props: FileExplorerProps) {
         if (targetFolder.type !== 'folder') return;
         
         const raw = e.dataTransfer.getData('application/json');
-        if (!raw) return;
+        
+        // 1. External File Drop
+        if (!raw) {
+             if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                 const files = Array.from(e.dataTransfer.files);
+                 for (const file of files) {
+                     await processFile(file, targetFolder.path);
+                 }
+             }
+             return;
+        }
+
+        // 2. Internal Move
         const ids = JSON.parse(raw) as string[];
 
         // Filter out if trying to drop into self
@@ -576,7 +640,7 @@ export default function FileExplorer(props: FileExplorerProps) {
                 
                 {/* Header ... (unchanged) */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                    <h2 style={{ fontSize: '1.5rem', fontWeight: 600 }}>Files</h2>
+                    <h2 style={{ fontSize: '1.5rem', fontWeight: 600 }}>Topic Explorer</h2>
                     <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer' }}>×</button>
                 </div>
 
@@ -628,7 +692,10 @@ export default function FileExplorer(props: FileExplorerProps) {
                         </button>
                     )}
                     <button onClick={handleCreateFolder} style={{ cursor: 'pointer' }}>
-                        New Folder
+                        New Topic
+                    </button>
+                    <button onClick={() => setIsLinkDialogOpen(true)} style={{ cursor: 'pointer' }}>
+                        Add Link
                     </button>
                     <button onClick={() => fileInputRef.current?.click()} style={{ cursor: 'pointer' }}>
                         Upload Logic
@@ -665,14 +732,33 @@ export default function FileExplorer(props: FileExplorerProps) {
                 </div>
 
                 {/* Dialog Overlay */}
-                {dialogAction && (
+                {(dialogAction || isLinkDialogOpen) && (
                     <div style={{
                         position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
                         background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
                         zIndex: 1000
-                    }} onClick={(e) => { e.stopPropagation(); setDialogAction(null); }}>
+                    }} onClick={(e) => { e.stopPropagation(); setDialogAction(null); setIsLinkDialogOpen(false); }}>
                         <div style={{ background: 'white', padding: '1.5rem', borderRadius: 8, width: 300 }} onClick={e => e.stopPropagation()}>
-                            {dialogAction.type === 'delete' && (
+                            {isLinkDialogOpen && (
+                                <>
+                                    <h3 style={{ margin: '0 0 1rem 0' }}>Add Link Source</h3>
+                                    <input 
+                                        autoFocus
+                                        placeholder="https://example.com/article"
+                                        value={linkUrl} 
+                                        onChange={e => setLinkUrl(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && handleAddLink()}
+                                        style={{ width: '100%', padding: '0.5rem', marginBottom: '1.5rem' }} 
+                                    />
+                                    <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+                                        <button onClick={() => setIsLinkDialogOpen(false)}>Cancel</button>
+                                        <button onClick={handleAddLink} disabled={isFetchingLink} style={{ background: '#007bff', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: 4 }}>
+                                            {isFetchingLink ? 'Fetching...' : 'Add'}
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+                            {dialogAction && dialogAction.type === 'delete' && (
                                 <>
                                     <h3 style={{ margin: '0 0 1rem 0' }}>Confirm Delete</h3>
                                     <p style={{ marginBottom: '1.5rem' }}>Delete <b>{dialogAction.file.name}</b>?</p>
@@ -682,7 +768,7 @@ export default function FileExplorer(props: FileExplorerProps) {
                                     </div>
                                 </>
                             )}
-                            {dialogAction.type === 'alert' && (
+                            {dialogAction && dialogAction.type === 'alert' && (
                                 <>
                                     <h3 style={{ margin: '0 0 1rem 0' }}>{dialogAction.title}</h3>
                                     <p style={{ marginBottom: '1.5rem', whiteSpace: 'pre-wrap' }}>{dialogAction.message}</p>
@@ -694,7 +780,7 @@ export default function FileExplorer(props: FileExplorerProps) {
                                     </div>
                                 </>
                             )}
-                            {dialogAction.type === 'rename' && (
+                            {dialogAction && dialogAction.type === 'rename' && (
                                 <>
                                     <h3 style={{ margin: '0 0 1rem 0' }}>Rename File</h3>
                                     <input 
@@ -715,8 +801,19 @@ export default function FileExplorer(props: FileExplorerProps) {
                 )}
                 
                 {/* File Grid */}
-                <div style={{ flex: 1, overflowY: 'auto' }}>
-                    {items.length === 0 && <div style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Empty Folder</div>}
+                <div 
+                    style={{ flex: 1, overflowY: 'auto' }}
+                    onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                    }}
+                    onDrop={async (e) => {
+                        e.preventDefault();
+                        // Target is currentPath
+                        await handleDrop(e, { id: currentPath, name: currentPath.split('/').pop() || 'root', path: currentPath, type: 'folder', updatedAt: 0 });
+                    }}
+                >
+                    {items.length === 0 && <div style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Empty Topic (Drop files here)</div>}
                     
                     {items.map((item, index) => (
                         <div key={item.id} 

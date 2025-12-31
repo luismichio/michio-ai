@@ -236,12 +236,12 @@ export class LocalStorageProvider implements StorageProvider {
     async renameFile(oldPath: string, newPath: string): Promise<void> {
         await this.ensureParent(newPath);
 
-        await db.transaction('rw', db.files, async () => {
+        await db.transaction('rw', db.files, db.chunks, async () => {
             const existing = await db.files.get(oldPath);
             if (!existing) throw new Error(`File not found: ${oldPath}`);
 
             // 1. Rename the item itself
-            await db.files.add({
+            await db.files.put({
                 ...existing,
                 path: newPath,
                 updatedAt: Date.now(),
@@ -249,6 +249,9 @@ export class LocalStorageProvider implements StorageProvider {
                 deleted: 0
             });
             await db.files.delete(oldPath);
+
+            // 1b. Migrate Chunks for this file
+            await db.chunks.where('filePath').equals(oldPath).modify({ filePath: newPath });
 
             // 2. If it's a folder, rename all children recursively
             if (existing.type === 'folder') {
@@ -259,7 +262,7 @@ export class LocalStorageProvider implements StorageProvider {
                     const childNewPath = child.path.replace(prefix, newPath + '/');
                     
                     // Create new child record
-                    await db.files.add({
+                    await db.files.put({
                         ...child,
                         path: childNewPath,
                         updatedAt: Date.now(),
@@ -269,6 +272,9 @@ export class LocalStorageProvider implements StorageProvider {
                     
                     // Delete old child record
                     await db.files.delete(child.path);
+
+                    // Migrate chunks for child
+                    await db.chunks.where('filePath').equals(child.path).modify({ filePath: childNewPath });
                 }
             }
         });
@@ -276,7 +282,7 @@ export class LocalStorageProvider implements StorageProvider {
 
     async deleteFile(virtualPath: string): Promise<void> {
         // Soft delete for sync
-        await db.transaction('rw', db.files, async () => {
+        await db.transaction('rw', db.files, db.chunks, async () => {
             const existing = await db.files.get(virtualPath);
             if (!existing) return;
 

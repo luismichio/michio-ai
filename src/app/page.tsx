@@ -1,5 +1,7 @@
 'use client';
 import { useSession, signIn, signOut } from "next-auth/react";
+import { localLlmService } from "@/lib/ai/local-llm";
+import { AIChatMessage } from "@/lib/ai/types";
 import Link from 'next/link';
 import { useState, useRef, useEffect } from "react";
 import GuestJournal from './components/GuestJournal';
@@ -13,6 +15,8 @@ import { useSync } from '@/hooks/useSync';
 import AddSourceModal from './components/AddSourceModal';
 import FileExplorer from './components/FileExplorer';
 import SourceViewer from './components/SourceViewer';
+
+import { ThemeSwitcher } from '@/components/ThemeSwitcher';
 
 export default function Home() {
   const { data: session, update } = useSession();
@@ -46,8 +50,66 @@ export default function Home() {
   const [historyLimit, setHistoryLimit] = useState(20); // Initial load limit
   const [sessionUsage, setSessionUsage] = useState({ input: 0, output: 0, total: 0 });
   
+  // Attached Files State
+  const [attachedFiles, setAttachedFiles] = useState<{name: string, path: string}[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
+  
   // Storage Provider
   const [storage] = useState(() => new LocalStorageProvider());
+  
+  // Local AI Progress State
+  const [downloadProgress, setDownloadProgress] = useState<{ percentage: number, text: string } | null>(null);
+
+  // Rate Limit Cooldown State (Timestamp when we can try server again)
+  const [rateLimitCooldown, setRateLimitCooldown] = useState<number | null>(null);
+  const [localAIStatus, setLocalAIStatus] = useState<string>("");
+
+  // Load Persisted Rate Limit on Mount
+  useEffect(() => {
+      const persisted = localStorage.getItem('michio_rate_limit_cooldown');
+      if (persisted) {
+          const timestamp = parseInt(persisted);
+          if (timestamp > Date.now()) {
+            setRateLimitCooldown(timestamp);
+            console.log(`[Smart Rate Limit] Loaded persisted cooldown until ${new Date(timestamp).toLocaleTimeString()}`);
+          } else {
+             localStorage.removeItem('michio_rate_limit_cooldown');
+          }
+      }
+  }, []);
+
+  // Pre-load Local AI on Mount
+  useEffect(() => {
+      async function preload() {
+          const config = await settingsManager.getConfig();
+          if (config.localAI?.enabled) {
+            console.log("Pre-loading Local AI...");
+            const localModelId = config.localAI.model || 'Llama-3.1-8B-Instruct-q4f32_1-MLC';
+            // Initialize without progress callback (silent) or handling it quietly
+            localLlmService.initialize(localModelId).catch(err => console.error("Preload failed", err));
+          }
+      }
+      preload();
+  }, []);
+
+  // Helper: Parse Rate Limit Duration
+  function parseRateLimitDuration(errorMsg: string): number {
+    // "Please try again in 48m48.096s"
+    const match = errorMsg.match(/Please try again in\s+([\d\.ms]+)/);
+    if (!match) return 0;
+    
+    const durationStr = match[1];
+    let ms = 0;
+    
+    // Parse "48m48.096s"
+    const parts = durationStr.match(/(\d+)m/);
+    if (parts) ms += parseInt(parts[1]) * 60 * 1000;
+    
+    const secParts = durationStr.match(/([\d\.]+)s/);
+    if (secParts) ms += parseFloat(secParts[1]) * 1000;
+    
+    return ms;
+  }
 
   // Set Date on Mount (Client-side only)
   useEffect(() => {
@@ -145,9 +207,52 @@ export default function Home() {
                 setIsLoadingHistory(false);
             }
         }
+
     }
     load();
   }, [currentDate, storage, historyLimit]); // Added historyLimit dependency
+
+  // Helper: Summary with Fallback
+  async function summarizeWithFallback(content: string): Promise<string | null> {
+      try {
+          // 1. Try Server API
+          const res = await fetch('/api/ai/summarize', {
+              method: 'POST',
+              body: JSON.stringify({ content }),
+              headers: { 'Content-Type': 'application/json' }
+          });
+          if (res.ok) {
+              const data = await res.json();
+              if (data.summary) return data.summary;
+          }
+      } catch (err) {
+          console.warn("[Summary] Server failed, trying Local AI...", err);
+      }
+
+      // 2. Try Local AI
+      try {
+          const config = await settingsManager.getConfig();
+          if (config.localAI?.enabled && localLlmService.isLoading() === false) {
+              console.log("[Summary] Using Local AI...");
+              // We need a non-streaming chat call here.
+              // We can reusing the existing chat method but ignoring the update callback for the most part
+              // or just accumulating it.
+              
+              const prompt = `Summarize the following content in 1-2 sentences. Start with "The content discusses...":\n\n${content.substring(0, 2000)}`; // Truncate for speed
+              
+              let summary = "";
+              await localLlmService.chat([
+                  { role: 'user', content: prompt }
+              ], (chunk) => { summary += chunk; });
+              
+              return summary.trim();
+          }
+      } catch (localErr) {
+          console.error("[Summary] Local AI also failed", localErr);
+      }
+
+      return null;
+  }
 
   async function handleChat(e: React.FormEvent) {
     e.preventDefault();
@@ -163,7 +268,14 @@ export default function Home() {
         const timestamp = new Date().toLocaleTimeString();
         
         // 1. Save User Message Locally
-        const logEntry = `### ${timestamp}\n**User**: ${userMsg}\n`;
+        let logEntry = `### ${timestamp}\n**User**: ${userMsg}\n`;
+        
+        // Append attachment info to log
+        if (attachedFiles.length > 0) {
+            const attInfo = attachedFiles.map(f => `[Attached: ${f.path}]`).join(', ');
+            logEntry = `### ${timestamp}\n**User**: ${userMsg}\n${attInfo}\n`;
+        }
+        
         await storage.appendFile(`history/${currentDate}.md`, logEntry);
         
         // Update local state immediately with estimate
@@ -183,32 +295,240 @@ export default function Home() {
         });
 
         // 2. Read Context (Rolling Window 6h + Knowledge Base)
-        // We use the new getRecentLogs method
         const localHistory = await storage.getRecentLogs(6); 
         const knowledgeContext = await storage.getKnowledgeContext(userMsg);
         
-        const fullContext = `${knowledgeContext}\n\n--- Current Conversation History (Last 6h) ---\n${localHistory}`;
+        let fullContext = `${knowledgeContext}\n\n--- Current Conversation History (Last 6h) ---\n${localHistory}`;
+        
+        // Inject Attachment Context
+        if (attachedFiles.length > 0) {
+            fullContext += `\n\n[SYSTEM: User has attached files. Look at 'temp/' folder if needed. Tools available: move_file, fetch_url.]`;
+            // Clear attachments after sending
+            setAttachedFiles([]);
+        }
 
         // 3. Call AI (Stateless - just compute)
+        // 3. Call AI (Stateless - just compute)
         const config = await settingsManager.getConfig();
-        
-        const res = await fetch("/api/chat", {
-            method: "POST",
-            body: JSON.stringify({ 
-                message: userMsg,
-                history: messages.slice(-10).map(m => ({ role: m.role, content: m.content })), // Send simplified history
-                context: fullContext,
-                config
-            }), 
-            headers: { "Content-Type": "application/json" },
-        });
-      
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || "Unknown error");
+        const respTimestamp = new Date().toLocaleTimeString(); // Hoist timestamp for use in fallback
+        let isFallback = false;
+
+        // Smart Rate Limit Check
+        if (rateLimitCooldown && Date.now() < rateLimitCooldown) {
+            console.warn(`[Smart Rate Limit] Skipping Server API. Cooldown active until ${new Date(rateLimitCooldown).toLocaleTimeString()}`);
+            isFallback = true;
+        }
+
+        let data: any;
+        let toolCalls: any[] | undefined;
+        let usageData: any;
+
+        try {
+            if (isFallback) {
+                throw new Error("[Smart Rate Limit] Skipping Server API");
+            }
+
+            if (!isFallback) {
+             const res = await fetch("/api/chat", {
+                method: "POST",
+                body: JSON.stringify({ 
+                    message: userMsg,
+                    history: messages.slice(-10).map(m => ({ role: m.role === 'michio' ? 'assistant' : 'user', content: m.content })), 
+                    context: fullContext,
+                    config
+                }), 
+                headers: { "Content-Type": "application/json" },
+            });
+            
+            if (!res.ok) {
+                // If it's a rate limit or server error, throw to catch block
+                if (res.status === 429 || res.status >= 500) {
+                     const errText = await res.text();
+                     throw new Error(`Server Error: ${res.status} - ${errText}`);
+                }
+                const data = await res.json();
+                throw new Error(data.message || "Unknown error");
+            }
+            
+            data = await res.json();
+            toolCalls = data.tool_calls;
+            usageData = data.usage;
+            } // End if(!isFallback)
+
+        } catch (serverError: any) {
+            console.error("Server API failed:", serverError);
+            isFallback = true;
+            
+            // Extract Rate Limit Duration if valid
+            const errorMsg = serverError.message || "";
+            if (errorMsg.includes("429") || errorMsg.includes("rate_limit_exceeded")) {
+                const duration = parseRateLimitDuration(errorMsg);
+                if (duration > 0) {
+                    const cooldownUntil = Date.now() + duration;
+                    setRateLimitCooldown(cooldownUntil);
+                    localStorage.setItem('michio_rate_limit_cooldown', cooldownUntil.toString());
+                    console.log(`[Smart Rate Limit] Penalty detected. Cooldown set for ${duration}ms (until ${new Date(cooldownUntil).toLocaleTimeString()})`);
+                }
+            }
+
+            // Check Local AI Fallback
+            if (config.localAI && config.localAI.enabled) {
+                setMessages(prev => [...prev, { role: 'michio', content: "⚠️ Cloud API limit reached. Switching to Local AI...", timestamp: respTimestamp }]);
+                
+                try {
+                    const localModelId = config.localAI.model || 'Llama-3.1-8B-Instruct-q4f32_1-MLC';
+                    
+                    // Ensure initialized before chatting
+                    if (!localLlmService.isInitialized()) {
+                         console.log("[Local AI] Engine not ready, initializing/waiting...");
+                         await localLlmService.initialize(localModelId, (progress) => {
+                             console.log("Local AI Progress:", progress);
+                             
+                             // Update Progress Bar & Status
+                             if (progress.includes("Fetching") || progress.includes("Loading")) {
+                                 const match = progress.match(/(\d+)%/);
+                                 if (match) {
+                                     setDownloadProgress({ percentage: parseInt(match[1]), text: progress });
+                                     setLocalAIStatus(`Thinking... (Loading Model ${match[1]}%)`);
+                                 } else {
+                                     setDownloadProgress({ percentage: 0, text: progress });
+                                     setLocalAIStatus(`Thinking... (${progress})`);
+                                 }
+                             }
+                         });
+                    }
+
+
+
+                    // Clear progress bar
+                    setDownloadProgress(null);
+
+                    // Clean up loading message
+                    setMessages(prev => prev.filter(m => !m.content.includes("Loading model") && !m.content.includes("Switching to Local AI")));
+
+                    // Construct messages for local AI
+                    const toolPrompt = `
+IMPORTANT INSTRUCTIONS:
+1. You are Michio, a helpful AI assistant.
+2. You have access to these tools:
+   - move_file(sourcePath, destinationPath)
+   - create_file(filePath, content)
+   - update_file(filePath, newContent, oldContent)
+   - fetch_url(url)
+   - update_user_settings(name, tone)
+3. To use a tool, output ONLY a valid JSON block and nothing else.
+4. PRIORITIZE CONTEXT: If the user asks a question, check the "Context" text below FIRST. If the answer is there, just reply with text. DO NOT use fetch_url for local files (paths starting with temp/ or misc/). Only use fetch_url for external HTTP URLs.
+5. NO REPETITION: Do NOT repeat previous tool actions (like updating simple lists) unless explicitly asked again.
+6. GREETINGS: If user says "hello", "hi", etc., just reply "Hello! How can I help?" DO NOT use any tools.
+7. ANSWER MODE: To answer a question, just reply with text. DO NOT use update_file or create_file to "save" the answer. Just speak. DO NOT modify .source.md files.
+`;
+                    
+                    // Truncate context to avoid overflow (Local AI has 4096 limit)
+                    const truncatedContext = fullContext.length > 3000 ? fullContext.substring(0, 3000) + "...(truncated)" : fullContext;
+                    
+                    const localHistory: AIChatMessage[] = [
+                        { role: 'system', content: `You are Michio. Context:\n${truncatedContext}${toolPrompt}` },
+                        ...messages.slice(-4).map(m => ({ role: m.role === 'michio' ? 'assistant' : 'user', content: m.content } as AIChatMessage)),
+                        { role: 'user', content: userMsg }
+                    ];
+
+                    let currentContent = "";
+                    setLocalAIStatus("Thinking");
+                    await localLlmService.chat(localHistory, (chunk) => {
+                        currentContent += chunk;
+                        setMessages(prev => {
+                            const msgs = [...prev];
+                            const last = msgs[msgs.length - 1];
+                            if (last.role === 'michio' && last.timestamp === respTimestamp) {
+                                last.content = currentContent;
+                                return msgs;
+                            } else {
+                                return [...msgs, { role: 'michio', content: currentContent, timestamp: respTimestamp }];
+                            }
+                        });
+                    });
+                     
+                    setLocalAIStatus(""); // clear status when done
+                    
+                    // Helper to extract JSON by counting braces
+                    const extractJson = (text: string): string | null => {
+                        const start = text.indexOf('{');
+                        if (start === -1) return null;
+                        
+                        let count = 0;
+                        for (let i = start; i < text.length; i++) {
+                            if (text[i] === '{') count++;
+                            if (text[i] === '}') count--;
+                            if (count === 0) {
+                                return text.substring(start, i + 1);
+                            }
+                        }
+                        return null;
+                    };
+
+                    const rawJson = extractJson(currentContent);
+
+                    if (rawJson) {
+                        try {
+                            const parsed = JSON.parse(rawJson);
+                            let toolName = parsed.tool;
+                            let toolArgs = parsed.args;
+
+                            // Handle Flat JSON (where args are at top level)
+                            if (toolName && !toolArgs) {
+                                const { tool, ...rest } = parsed;
+                                toolArgs = rest;
+                            }
+
+                            if (toolName && toolArgs) {
+                                console.log("[Local AI] Detected Tool Call:", parsed);
+                                toolCalls = [{
+                                    function: {
+                                        name: toolName,
+                                        arguments: JSON.stringify(toolArgs)
+                                    }
+                                }];
+                                // Hide JSON from UI
+                                const strippedContent = currentContent.replace(rawJson, "").trim();
+                                currentContent = strippedContent.replace(/```json/g, "").replace(/```/g, "").trim();
+                                
+                                if (!currentContent) currentContent = "🔄 Executing local tool...";
+
+                                // Update UI with stripped content
+                                setMessages(prev => {
+                                    const msgs = [...prev];
+                                    const last = msgs[msgs.length - 1];
+                                    if (last.role === 'michio' && last.timestamp === respTimestamp) {
+                                        last.content = currentContent;
+                                        return msgs;
+                                    }
+                                    return prev;
+                                });
+                            }
+                        } catch (e) {
+                            console.error("[Local AI] Failed to parse tool JSON. Raw:", rawJson, e);
+                        }
+                    }
+
+                    data = { response: currentContent }; 
+                    // toolCalls is now set if found
+
+                } catch (localError: any) {
+                     console.error("Local AI failed:", localError);
+                     setMessages(prev => [...prev, { role: 'michio', content: `❌ Error: Both Cloud and Local AI failed. ${localError.message}`, timestamp: respTimestamp }]);
+                     setIsChatting(false);
+                     return;
+                }
+
+            } else {
+                 setMessages(prev => [...prev, { role: 'michio', content: `❌ Error: ${serverError.message}`, timestamp: respTimestamp }]);
+                 setIsChatting(false);
+                 return;
+            }
+        }
         
         const responseText = data.response;
-        const usageData = data.usage; // { prompt_tokens, completion_tokens, total_tokens }
-        const toolCalls = data.tool_calls;
+        // usageData might be undefined from local execution
 
         // Update Session Stats
         if (usageData) {
@@ -219,7 +539,7 @@ export default function Home() {
             }));
         }
 
-        const respTimestamp = new Date().toLocaleTimeString();
+
 
         // Handle Tool Calls (e.g. update_file)
         if (toolCalls && toolCalls.length > 0) {
@@ -230,19 +550,11 @@ export default function Home() {
                          let newContent = args.newContent;
 
                          // Auto-Summarize for AI Edits too
-                         try {
-                             const res = await fetch('/api/ai/summarize', {
-                                 method: 'POST',
-                                 body: JSON.stringify({ content: newContent }),
-                                 headers: { 'Content-Type': 'application/json' }
-                             });
-                             const data = await res.json();
-                             if (data.summary) {
-                                 newContent = `> **Summary**: ${data.summary}\n\n---\n\n${newContent}`;
-                             }
-                         } catch (err) {
-                             console.error("Tool Summary Failed", err);
-                             // Proceed with raw content
+                         if (args.newContent && args.newContent.length > 50) {
+                            const summary = await summarizeWithFallback(args.newContent);
+                            if (summary) {
+                                newContent = `> **Summary**: ${summary}\n\n---\n\n${newContent}`;
+                            }
                          }
 
                          await storage.updateFile(args.filePath, newContent);
@@ -268,21 +580,15 @@ export default function Home() {
              if (tool.function.name === 'create_file') {
                  try {
                      const args = JSON.parse(tool.function.arguments);
-                     let content = args.content;
 
+
+                     let content = args.content;
                      // Auto-Summarize
-                     try {
-                         const res = await fetch('/api/ai/summarize', {
-                             method: 'POST',
-                             body: JSON.stringify({ content: content }),
-                             headers: { 'Content-Type': 'application/json' }
-                         });
-                         const data = await res.json();
-                         if (data.summary) {
-                             content = `> **Summary**: ${data.summary}\n\n---\n\n${content}`;
-                         }
-                     } catch (err) {
-                         console.error("Tool Summary Failed", err);
+                     if (content && content.length > 50) {
+                        const summary = await summarizeWithFallback(content);
+                        if (summary) {
+                            content = `> **Summary**: ${summary}\n\n---\n\n${content}`;
+                        }
                      }
 
                      await storage.saveFile(args.filePath, content);
@@ -332,21 +638,131 @@ export default function Home() {
                      console.error("Tool Settings Error", e);
                 }
              }
+     
+             
+             if (tool.function.name === 'move_file') {
+                 try {
+                     const args = JSON.parse(tool.function.arguments);
+                     console.log(`[Tool] move_file called: ${args.sourcePath} -> ${args.destinationPath}`);
+                     
+                     // 1. Verify existence before move
+                     let finalSourcePath = args.sourcePath;
+                     const exists = await storage.getFile(args.sourcePath);
+                     
+                     if (!exists) {
+                         console.warn(`[Tool] Source file not found: ${args.sourcePath}. Checking temp/ prefix...`);
+                         // Fix: Check if it's in temp/ but user/AI didn't specify
+                         const tempPath = `temp/${args.sourcePath}`;
+                         const tempExists = await storage.getFile(tempPath);
+                         
+                         if (tempExists) {
+                             console.log(`[Tool] Found file in temp: ${tempPath}`);
+                             finalSourcePath = tempPath;
+                         } else {
+                             // Deep search / listing? For now just fail if not in direct temp
+                              throw new Error(`File not found: ${args.sourcePath}`);
+                         }
+                     }
+                     
+                     // 2. Auto-Summarize if text/md
+                     const isText = finalSourcePath.endsWith('.md') || finalSourcePath.endsWith('.txt');
+                     // Avoid re-summarizing if it's already a source file or has summary
+                     const isAlreadySource = finalSourcePath.includes('.source.'); 
+                     
+                     if (isText && !isAlreadySource) {
+                        try {
+                             const content = await storage.readFile(finalSourcePath);
+                             if (typeof content === 'string' && content.length > 50 && !content.startsWith('> **Summary**')) {
+                                 setMessages(prev => [...prev, { role: 'michio', content: `Summarizing content before filing...`, timestamp: respTimestamp }]);
+                                 
+                                 const summary = await summarizeWithFallback(content);
+                                 if (summary) {
+                                     const newContent = `> **Summary**: ${summary}\n\n---\n\n${content}`;
+                                     await storage.saveFile(finalSourcePath, newContent);
+                                 }
+                             }
+                        } catch (e) {
+                             console.error("[Move] Summary failed, proceeding with move.", e);
+                        }
+                     }
+
+                     await storage.renameFile(finalSourcePath, args.destinationPath);
+                     
+                     const msg = `Moved *${finalSourcePath}* to *${args.destinationPath}*.`;
+                     setMessages(prev => [...prev, { role: 'michio', content: msg, timestamp: respTimestamp }]);
+                     await storage.appendFile(`history/${currentDate}.md`, `**Michio**: ${msg}\n`);
+                 } catch (e: any) {
+                     console.error("Move Error", e);
+                     setMessages(prev => [...prev, { role: 'michio', content: `Failed to move file: ${e.message}`, timestamp: respTimestamp }]);
+                 }
              }
-             // For now, we stop here. In a real agent loop, we'd feed the result back to AI.
-             // But for "Edit this file", a confirmation is enough.
-        } else {
-             // Normal Text Response
+
+             if (tool.function.name === 'fetch_url') {
+                 try {
+                     const args = JSON.parse(tool.function.arguments);
+                     const { url, destinationPath } = args;
+                     
+                     setMessages(prev => [...prev, { role: 'michio', content: `Fetching content from ${url}...`, timestamp: respTimestamp }]);
+
+                     const res = await fetch('/api/utils/fetch-url', {
+                        method: 'POST',
+                        body: JSON.stringify({ url }),
+                        headers: { 'Content-Type': 'application/json' }
+                     });
+                     const data = await res.json();
+                     if (!res.ok) throw new Error(data.message);
+
+                     // Summarize
+                     let finalContent = data.content;
+                     try {
+                        const sumRes = await fetch('/api/ai/summarize', {
+                            method: 'POST',
+                            body: JSON.stringify({ content: data.content }),
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        const sumData = await sumRes.json();
+                        if (sumData.summary) {
+                            finalContent = `> **Summary**: ${sumData.summary}\n\n> **Source**: ${url}\n\n---\n\n${data.content}`;
+                        } else {
+                            finalContent = `> **Source**: ${url}\n\n---\n\n${data.content}`;
+                        }
+                     } catch (e) {
+                         console.error("Summary Failed", e);
+                         finalContent = `> **Source**: ${url}\n\n---\n\n${data.content}`;
+                     }
+
+                     await storage.saveFile(destinationPath, finalContent);
+                     
+                     const msg = `Saved source from ${url} to *${destinationPath}*.`;
+                     setMessages(prev => [...prev, { role: 'michio', content: msg, timestamp: respTimestamp }]);
+                     await storage.appendFile(`history/${currentDate}.md`, `**Michio**: ${msg}\n`);
+
+                 } catch (e: any) {
+                     console.error("Fetch URL Error", e);
+                     setMessages(prev => [...prev, { role: 'michio', content: `Failed to fetch URL: ${e.message}`, timestamp: respTimestamp }]);
+                 }
+             }
+        } // End of toolCalls loop
+        } // End of if (toolCalls)
+
+        // Normal Text Response
+        // Only append to UI if NOT fallback (since fallback streams updates live)
+        if (!isFallback && responseText) {
              setMessages(prev => [...prev, { 
                 role: 'michio', 
                 content: responseText, 
                 timestamp: respTimestamp,
                 usage: usageData ? { total_tokens: usageData.completion_tokens } : undefined
             }]);
-            
-            // 4. Save Michio Response Locally
+        }
+        
+        // 4. Save Michio Response Locally (If we have text content)
+        // Check if responseText is valid and distinct from tool confirmation
+        if (responseText && (!toolCalls || toolCalls.length === 0)) {
             const michioEntry = `**Michio**: ${responseText}\n`;
+            console.log("[Local AI] Saving response to history:", michioEntry.trim().substring(0, 50) + "...");
             await storage.appendFile(`history/${currentDate}.md`, michioEntry);
+            console.log("[Local AI] History saved to", `history/${currentDate}.md`);
         }
 
         // 5. Trigger Cloud Sync (if online)
@@ -460,21 +876,7 @@ export default function Home() {
                     ⚙️
                 </button>
              </Link>
-             <button 
-                onClick={() => setIsSourceModalOpen(true)}
-                style={{
-                    fontSize: '1.2rem', 
-                    background: '#f3f4f6', 
-                    border: 'none', 
-                    borderRadius: '50%', 
-                    width: 32, height: 32, 
-                    cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center'
-                }}
-                title="Add Source"
-             >
-                +
-             </button>
+             {/* Removed + Button */}
              
              <button 
                 onClick={() => setIsExplorerOpen(true)}
@@ -493,10 +895,11 @@ export default function Home() {
         </div>
         
         <div className={styles.authBadge}>
+             <ThemeSwitcher />
              {session ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
                     {/* Session Usage Counter */}
-                    <div style={{ fontSize: '0.75rem', color: '#666', border: '1px solid #ddd', padding: '2px 6px', borderRadius: 4 }}>
+                    <div style={{ fontSize: '0.75rem', opacity: 0.6, border: '1px solid currentColor', padding: '2px 6px', borderRadius: 4 }}>
                         ∑ Tokens: {sessionUsage.total}
                     </div>
 
@@ -581,8 +984,9 @@ export default function Home() {
                 )}
 
                 {isChatting && (
-                    <div className={styles.michioMessage} style={{ fontStyle: 'italic', opacity: 0.5 }}>
-                        Thinking...
+                    <div className={styles.michioMessage} style={{ fontStyle: 'italic', opacity: 0.5, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span>{localAIStatus || "Thinking"}</span>
+                        <span className={styles.loadingDots}></span>
                     </div>
                 )}
              </div>
@@ -590,29 +994,97 @@ export default function Home() {
 
       {/* 3. Fixed Input Area */}
       <div className={styles.inputArea}>
-        <form onSubmit={handleChat} className={styles.inputWrapper}>
-            <textarea 
-                ref={textareaRef}
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleChat(e as any);
-                  }
-                }}
-                placeholder="Message Michio..."
-                className={styles.chatInput}
-                rows={1}
-            />
-            <button type="submit" disabled={isChatting} className={styles.sendBtn}>
-                {isChatting ? (
-                    <span style={{ fontSize: '1.2rem', animation: 'spin 1s linear infinite' }}>⟳</span>
-                ) : (
-                    <span>↑</span>
+
+
+         {!downloadProgress && (
+
+            <form onSubmit={handleChat} className={styles.inputWrapper} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                {/* Drag & Drop Overlay */}
+                {isDragOver && (
+                    <div style={{
+                        position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                        background: 'rgba(59, 130, 246, 0.1)',
+                        border: '2px dashed #3b82f6',
+                        borderRadius: 8,
+                        pointerEvents: 'none',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: '#3b82f6', fontWeight: 600,
+                        zIndex: 10
+                    }}>
+                        Drop files here to attach
+                    </div>
                 )}
-            </button>
-        </form>
+                
+                {/* Attached Files Preview */}
+                {attachedFiles.length > 0 && (
+                    <div style={{ width: '100%', padding: '0 0.5rem 0.5rem 0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', borderBottom: '1px solid rgba(255,255,255,0.05)', marginBottom: '0.5rem' }}>
+                        {attachedFiles.map((f, i) => (
+                            <div key={i} style={{ fontSize: '0.75rem', background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: 4 }}>
+                                {f.name}
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                <div style={{ display: 'flex', width: '100%', alignItems: 'flex-end', gap: '0.5rem' }}>
+                    <textarea 
+                        ref={textareaRef}
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        onDragEnter={() => setIsDragOver(true)}
+                        onDragLeave={() => setIsDragOver(false)}
+                        onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                        onDrop={async (e) => {
+                            e.preventDefault();
+                            setIsDragOver(false);
+                            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                                const files = Array.from(e.dataTransfer.files);
+                                for (const file of files) {
+                                    // Sanitize filename to strict ASCII to avoid encoding issues
+                                    const safeName = file.name.replace(/[^a-zA-Z0-9.\-_ ()]/g, '').replace(/\s+/g, ' ').trim();
+                                    const path = `temp/${safeName}`;
+                                    
+                                    console.log(`[Drop] Saving ${file.name} to ${path}`);
+
+                                    // Simple Save (Binary or Text)
+                                    if (file.type.startsWith('text/') || file.name.endsWith('.md')) {
+                                        const text = await file.text();
+                                        await storage.saveFile(path, text);
+                                    } else {
+                                        const buffer = await file.arrayBuffer();
+                                        await storage.saveFile(path, buffer);
+                                    }
+                                    
+                                    // Double check existence
+                                    const exists = await storage.getFile(path);
+                                    if (!exists) console.error(`[Drop] VERIFICATION FAILED for ${path}`);
+                                    else console.log(`[Drop] Verified ${path} exists in DB`);
+
+                                    setAttachedFiles(prev => [...prev, { name: safeName, path }]);
+                                }
+                            }
+                        }}
+                        onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleChat(e as any);
+                        }
+                        }}
+                        placeholder="Message Michio... (Drag & Drop files)"
+                        className={styles.chatInput}
+                        rows={1}
+                    />
+                    <button type="submit" disabled={isChatting} className={styles.sendBtn}>
+                        {isChatting ? (
+                            <span style={{ fontSize: '1.2rem', animation: 'spin 1s linear infinite' }}>⟳</span>
+                        ) : (
+                            <span>↑</span>
+                        )}
+                    </button>
+                </div>
+            </form>
+         )}
+
       </div>
 
       {/* 4. Calendar Modal */}

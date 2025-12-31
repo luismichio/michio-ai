@@ -67,6 +67,48 @@ const TOOLS: AITool[] = [
                 },
             },
         },
+    },
+    {
+        type: "function",
+        function: {
+            name: "move_file",
+            description: "Move or rename a file. Use this to organize files into folders (Topics) or rename them.",
+            parameters: {
+                type: "object",
+                properties: {
+                    sourcePath: {
+                        type: "string",
+                        description: "The current path of the file (e.g. 'temp/myfile.pdf')."
+                    },
+                    destinationPath: {
+                        type: "string",
+                        description: "The new path for the file (e.g. 'misc/Work/myfile.pdf')."
+                    }
+                },
+                required: ["sourcePath", "destinationPath"]
+            }
+        }
+    },
+    {
+        type: "function",
+        function: {
+            name: "fetch_url",
+            description: "Fetch content from a URL to save as a source. Use this when the user shares a link.",
+            parameters: {
+                type: "object",
+                properties: {
+                    url: {
+                        type: "string",
+                        description: "The URL to fetch."
+                    },
+                    destinationPath: {
+                        type: "string",
+                        description: "The path to save the source to (e.g. 'misc/Research/source.md')."
+                    }
+                },
+                required: ["url", "destinationPath"]
+            }
+        }
     }
 ];
 

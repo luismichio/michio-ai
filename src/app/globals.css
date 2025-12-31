@@ -1,8 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
-  --background: #0a0a0a;
-  --foreground: #ededed;
-  --accent: #3b82f6; /* A guide star blue */
-  --path-color: #2a2a2a;
+  /* Design Tokens - Light (Warmer Paper) */
+  --background: #F9F7F2;
+  /* Warm Paper */
+  --surface: #FFFFFF;
+  /* Pure White */
+  --foreground: #1A1C1A;
+  /* Ink Black */
+  --secondary: #5C635C;
+  /* Slate Sage */
+  --accent: #6B8E6B;
+  /* Classic Sage */
+  --border: #E2E8E2;
+  /* Light Stroke */
+  --overlay: rgba(107, 142, 107, 0.1);
+
+  --font-sans: var(--font-inter);
+  --font-serif: var(--font-merriweather);
+}
+
+.dark {
+  /* Design Tokens - Dark (Deep Obsidian) */
+  --background: #121412;
+  /* Deep Obsidian Sage */
+  --surface: #1E211E;
+  /* Elevated Sage Gray */
+  --foreground: #E0E4E0;
+  /* Soft Silver Sage */
+  --secondary: #9BA39B;
+  /* Muted Moss */
+  --accent: #8FBC8F;
+  /* Desaturated Seafoam */
+  --border: #2D332D;
+  /* Dark Stroke */
+  --overlay: rgba(143, 188, 143, 0.1);
 }
 
 html,
@@ -11,11 +45,11 @@ body {
   overflow-x: hidden;
   background-color: var(--background);
   color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen,
-    Ubuntu, Cantarell, Fira Sans, Droid Sans, Helvetica Neue, sans-serif;
+  font-family: var(--font-sans), system-ui, sans-serif;
   margin: 0;
   padding: 0;
   height: 100%;
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
 
 a {
@@ -27,14 +61,37 @@ a {
   box-sizing: border-box;
 }
 
-/* Scrollbar */
+/* Typography Utilities */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  /* Bold confidence */
+  letter-spacing: -0.02em;
+}
+
+p,
+li,
+span,
+div {
+  /* Default to sans, but specific areas will use serif */
+}
+
+/* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
 }
+
 ::-webkit-scrollbar-track {
-  background: var(--background);
+  background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
-  background: #333;
+  background: var(--accent);
+  opacity: 0.5;
   border-radius: 4px;
 }
