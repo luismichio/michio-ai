@@ -541,10 +541,10 @@ IMPORTANT INSTRUCTIONS:
                         }
                         
                         // TOOL DETECTION (Local 1B/8B Format: <function name="...">{args}</function>)
-                        const toolMatch = currentContent.match(/<function=\s*"([^"]+)"\s*>(.*?)<\/function>/s) || 
-                                          currentContent.match(/<function=(.*?)>(.*?)<\/function>/s) ||
+                        const toolMatch = currentContent.match(/<function=\s*"([^"]+)"\s*>([\s\S]*?)<\/function>/) || 
+                                          currentContent.match(/<function=(.*?)>([\s\S]*?)<\/function>/) ||
                                           // 1B often does: <function=fetch_url>{"url": "..."}</function>
-                                          currentContent.match(/<function[\s$]+(\w+)[\s$]*>(.*?)<\/function>/s); // Generic fallback
+                                          currentContent.match(/<function[\s$]+(\w+)[\s$]*>([\s\S]*?)<\/function>/); // Generic fallback
 
                         if (toolMatch) {
                             const [fullMatch, tName, tArgs] = toolMatch;
