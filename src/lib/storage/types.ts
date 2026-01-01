@@ -5,6 +5,7 @@ export interface FileMeta {
     updatedAt: number;
     type: 'file' | 'folder' | 'source';
     remoteId?: string; // Google Drive ID (for robust sync)
+    deleted?: number; // Soft delete flag (1 = deleted, 0 = active)
 }
 
 export interface StorageProvider {

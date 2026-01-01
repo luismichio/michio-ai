@@ -41,7 +41,7 @@ export class McpServer {
                 // 2. Fix separators
                 cleanPath = cleanPath.replace(/\\/g, '/');
                 // 3. Trim whitespace around slashes (e.g. "misc / foo")
-                cleanPath = cleanPath.split('/').map(p => p.trim()).join('/');
+                cleanPath = cleanPath.split('/').map((p: string) => p.trim()).join('/');
                 
                 // 3. Prefix with misc/ if needed
                 let finalPath = cleanPath;
@@ -148,17 +148,7 @@ export class McpServer {
             }
         });
 
-        // Tool: fetch_url
-        this.registerTool({
-            name: "fetch_url",
-            description: "Fetch content from a URL via proxy.",
-            inputSchema: {
-                type: "object",
-                properties: {
-                    url: { type: "string" }
-                },
-            }
-        });
+
 
         // Tool: cleanup_orphans
         this.registerTool({
