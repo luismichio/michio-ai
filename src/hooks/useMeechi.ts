@@ -22,11 +22,9 @@ export function useMeechi() {
             let info: any = {};
             if ('gpu' in navigator) {
                 try {
-                    // @ts-expect-error - WebGPU
                     const adapter = await navigator.gpu.requestAdapter();
                     if (adapter) {
                         if (adapter.info) {
-                            // @ts-expect-error - info
                             info = adapter.info;
                         } else if (typeof adapter.requestAdapterInfo === 'function') {
                             info = await adapter.requestAdapterInfo();
