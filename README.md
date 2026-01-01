@@ -73,6 +73,18 @@ Meechi is built with the latest web technologies to ensure speed, privacy, and r
 
 ## 📜 Development Changelog
 
+### v0.9.9 - Stability & Grounding (Jan 2026)
+*   **Strict Grounding**:
+    *   **Orphan Clean-up**: Added a dedicated `cleanup_orphans` tool to safely remove "ghost" source files from deleted PDFs.
+    *   **Role Correction**: Fixed tool result protocol (Result must be `user` role) to satisfy strict Llama-3 requirements.
+    *   **Prompt Hardening**: Enforced strict XML tool output compliance for 8B models to prevent "chatting instead of doing".
+*   **Stability**:
+    *   **Crash Prevention**: Implemented strict 6000-char context limit and reduced WebLLM Safe Context to 4096 tokens to prevent GPU OOM errors.
+    *   **Recursion Logic**: Fixed `MessageOrderError` by making recursive self-correction conditional on tool usage.
+*   **UI Polish**:
+    *   **Smart Labels**: Chat input now correctly identifies "High-Power Mode" (8B) models.
+    *   **Stuck UI Fix**: Resolved "Using Tools..." hang by correctly revealing partial AI responses.
+
 ### v0.9.5 - The Local Cortex (Jan 2026)
 *   **True Local-First RAG**: 
     *   **Direct Context Injection**: Refactored the prompt engineering pipeline to inject retrieved file content directly into the User Message, bypassing model "safety filters" that previously ignored system context.

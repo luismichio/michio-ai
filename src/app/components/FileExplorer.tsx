@@ -121,7 +121,8 @@ export default function FileExplorer(props: FileExplorerProps) {
         
         // simple prefix query
         const allFiles = await db.files.where('path').startsWith(queryPath).toArray();
-        
+        console.log(`[FileExplorer] Query '${queryPath}' returned ${allFiles.length} files.`, allFiles.map(f => f.path));
+
         const folders = new Set<string>();
         const currentLevelFiles: FileMeta[] = [];
 

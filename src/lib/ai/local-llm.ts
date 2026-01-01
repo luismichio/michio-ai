@@ -43,40 +43,46 @@ export class WebLLMService {
                 // Service Workers are great for multi-tab, but brittle for "Active Controller" checks.
                 // Standard Worker is isolated and just works.
                 console.log("[Meechi] Initializing via Standard Web Worker (High Reliability)...");
+
+                // Ensure previous engine is unloaded to free GPU memory
+                if (this.engine) {
+                    try {
+                        console.log("[Meechi] Unloading previous engine...");
+                        await this.engine.unload();
+                    } catch (e) {
+                        console.warn("[Meechi] Failed to clean unload:", e);
+                    }
+                    this.engine = null;
+                }
                 
                 // CORRECT CONFIGURATION FOR CONTEXT WINDOW
-                // CreateMLCEngine(modelId, engineConfig, chatOpts)
-                // context_window_size belongs in the chatOpts (3rd argument) OR specifically in top-level config?
-                // Actually, for WebLLM 0.2.x, it's often best to set it in initProgressCallback's object 
-                // OR rely on the underlying model config.
-                // We will attempt to pass it in both places to be safe.
+                // Lowering default context to 4096 to prevent OOM/Device Lost on mid-range GPUs
+                const SAFE_CONTEXT_WINDOW = 4096;
                 
                 this.engine = await CreateMLCEngine(modelId, {
                     initProgressCallback: (progress) => {
                         this.progressListeners.forEach(cb => cb(progress.text));
                     },
-                    // Try passing here as well for safety
-                    // @ts-ignore - Some versions allow this
-                    context_window_size: 8192
+                    // @ts-ignore
+                    context_window_size: SAFE_CONTEXT_WINDOW
                 }, {
-                    context_window_size: 8192,
-                    // sliding_window_size: 2048, // Optional: if we wanted to support infinite constrained chat
+                    context_window_size: SAFE_CONTEXT_WINDOW,
                 });
-                
-                /* 
-                // Legacy Service Worker Path (Disabled for stability)
-                if ('serviceWorker' in navigator) { ... } 
-                */
                 
                 this.currentModelId = modelId;
             } catch (error: any) {
                 console.error("Failed to initialize WebLLM:", error);
                 
+                // FORCE RESET on error
+                if (this.engine) {
+                    try { await this.engine.unload(); } catch {} 
+                    this.engine = null;
+                }
+                this.currentModelId = null;
+
                 // Check for GPU Context Lost
                 if (error.message?.includes("Context lost") || error.message?.includes("valid external Instance")) {
                     console.warn("GPU Context Lost detected during init. Clearing state...");
-                    this.engine = null;
-                    this.currentModelId = null;
                 }
                 throw error;
             } finally {
@@ -96,7 +102,7 @@ export class WebLLMService {
     async chat(
         messages: AIChatMessage[],
         onUpdate: (chunk: string) => void,
-        tools?: AITool[]
+        options: { tools?: AITool[]; temperature?: number; top_p?: number } = {}
     ): Promise<string> {
         if (!this.engine) {
             throw new Error("Local Engine not initialized");
@@ -106,17 +112,14 @@ export class WebLLMService {
         // WebLLM accepts { role: "user" | "assistant" | "system", content: string }
         // Our AIChatMessage is compatible.
         
-        // Note: WebLLM's tool support might be limited or different. 
-        // For now, we will focus on text-only fallback to avoid complexity,
-        // unless specific tool calling is required for local fallback.
-        // If tools are critical, we'd need to check WebLLM's specific tool API (OpenAI compatible).
-
         let fullResponse = "";
         
         try {
             const completion = await this.engine.chat.completions.create({
                 messages: messages as any, // Cast to avoid minor type mismatches if any
                 stream: true,
+                temperature: options.temperature ?? 0.7, // Default to 0.7 if not specified
+                top_p: options.top_p ?? 0.9,
                 // stream_options: { include_usage: true }, // Optional
             });
 

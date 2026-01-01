@@ -1,6 +1,4 @@
-import { AIProvider, AIChatMessage, AITool, AICompletion } from "./types";
-import { GroqProvider } from "./providers/groq";
-import { GeminiProvider } from "./providers/gemini";
+import { SYSTEM_PROMPT } from "@/lib/ai/prompts";
 
 export interface AIConfig {
     activeProviderId: string;
@@ -47,9 +45,12 @@ export class AIManager {
 
         // 2. Construct Messages
         // Inject Identity/Tone into System Prompt
+        // Inject Identity/Tone into System Prompt
         const identity = config.identity || { name: "Traveler", tone: "Casual" };
         const systemPrompt = `
-You are Meechi, a personal cognitive partner.
+${SYSTEM_PROMPT}
+
+### PERSONALITY & IDENTITY
 User Name: ${identity.name}
 Tone: ${identity.tone}
 

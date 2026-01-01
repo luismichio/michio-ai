@@ -1,239 +1,302 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { localLlmService } from '@/lib/ai/local-llm';
-import { settingsManager } from '@/lib/settings';
-import { AIChatMessage, AITool } from '@/lib/ai/types';
+import { settingsManager, AppConfig } from '@/lib/settings';
+import { AIChatMessage } from '@/lib/ai/types';
+import { SYSTEM_PROMPT } from '@/lib/ai/prompts';
+import { mcpServer } from '@/lib/mcp/McpServer';
 
 // Constants for Models
 const MODEL_LOW_POWER = 'Llama-3.2-1B-Instruct-q4f16_1-MLC';
-// const MODEL_STANDARD = 'Llama-3.1-8B-Instruct-q4f32_1-MLC'; 
 const MODEL_STANDARD = 'Llama-3.1-8B-Instruct-q4f32_1-MLC';
 
+// Helper to parse tool calls from text (Local 1B/8B format)
+function parseLocalToolCalls(content: string) {
+    const tools = [];
+    
+    // Regex for <function="name">{args}</function> or <function name='name'>{args}</function>
+    const toolRegex = /<function(?:=\s*["']?([^"'>]+)["']?|\s+name=["']?([^"'>]+)["']?)\s*>([\s\S]*?)<\/function>/g;
+    let match;
+    while ((match = toolRegex.exec(content)) !== null) {
+        const name = (match[1] || match[2]).replace(/["']/g, "").trim();
+        const argsStr = match[3].trim();
+        try {
+            // Attempt 1: Strict JSON
+            const args = JSON.parse(argsStr);
+            tools.push({ name, args, raw: match[0] });
+        } catch (e) {
+            try {
+                // Attempt 2: Sanitize Newlines in Strings (Common LLM error)
+                // Regex matches double-quoted strings and escapes unescaped newlines inside them
+                const sanitized = argsStr.replace(/"((?:[^"\\]|\\.)*)"/g, (match) => {
+                     // Replace literal newlines with escaped newlines
+                    return match.replace(/\n/g, "\\n").replace(/\r/g, "");
+                });
+                const args = JSON.parse(sanitized);
+                tools.push({ name, args, raw: match[0] });
+            } catch (e2) {
+                // Attempt 3: Relaxed + Sanitized (Desperate fallback)
+                try {
+                    const fixed = argsStr
+                        .replace(/'/g, '"') // Replace single quotes
+                        .replace(/,\s*}/g, '}') // Remove trailing comma
+                        // Sanitize newlines in the now-double-quoted strings
+                        .replace(/"((?:[^"\\]|\\.)*)"/g, (m) => m.replace(/\n/g, "\\n").replace(/\r/g, ""));
+                    
+                    const args = JSON.parse(fixed);
+                    tools.push({ name, args, raw: match[0] });
+                } catch (e3) {
+                    console.error(`Failed to parse args for tool ${name}`, argsStr);
+                    tools.push({ name, args: {}, error: "Invalid JSON arguments", raw: match[0] });
+                }
+            }
+        }
+    }
+    return tools;
+}
+
 export function useMeechi() {
-    // Default to TRUE for low settings to prevent GPU crash, then only upgrade if powerful
     const [isLowPowerDevice, setIsLowPowerDevice] = useState(true);
     const [localAIStatus, setLocalAIStatus] = useState<string>("");
     const [downloadProgress, setDownloadProgress] = useState<{ percentage: number, text: string } | null>(null);
+    const [loadedModel, setLoadedModel] = useState<string | null>(null);
     const [isReady, setIsReady] = useState(false);
+    const [rateLimitCooldown, setRateLimitCooldown] = useState<number | null>(null);
 
-    // Hardware Detection & Pre-warming
+    // Initialization Logic
     useEffect(() => {
-        // Helper to get GPU info
-        async function getHardwareInfo() {
-            let info: any = {};
-            if ('gpu' in navigator) {
-                try {
-                    const adapter = await navigator.gpu.requestAdapter();
-                    if (adapter) {
-                        const a = adapter as any;
-                        if (a.info) {
-                            info = a.info;
-                        } else if (typeof a.requestAdapterInfo === 'function') {
-                            info = await a.requestAdapterInfo();
-                        }
-                    }
-                } catch (e) {
-                    console.warn("WebGPU detection failed", e);
-                }
-            }
-            return info;
-        }
-
-        async function detectAndInit() {
+        const init = async () => {
             const config = await settingsManager.getConfig();
-            console.log("[Meechi] Init Hook Triggered. Config Enable:", config.localAI.enabled);
             
-            if (config.localAI.enabled) {
-                try {
-                    setLocalAIStatus("Detecting Hardware...");
-                    
-                    // Hardware Check
-                    const info = await getHardwareInfo();
-                    console.log("[Meechi] Hardware detected:", info.renderer);
-                    
-                    let lowPower = true; 
-                    // Override for High-End Nvidia
-                    if (info.renderer && /RTX (3090|4080|4090|A6000)/i.test(info.renderer)) {
-                         lowPower = false;
-                    }
-                    // Apple Silicon M1/M2/M3 -> High Power usually fine for 8B
-                    if (info.vendor === 'apple') lowPower = false;
+            // Check Rate Limit Persisted
+            const persisted = localStorage.getItem('michio_rate_limit_cooldown');
+            if (persisted) {
+                 const ts = parseInt(persisted);
+                 if (ts > Date.now()) setRateLimitCooldown(ts);
+            }
 
-                    setIsLowPowerDevice(lowPower);
-                    console.log("[Meechi] Using Model:", lowPower ? "Llama-3.2-1B (Low Power)" : "Llama-3.1-8B (High Power)");
+            if (!config.localAI.enabled) return;
 
-                    const modelId = lowPower
-                        ? "Llama-3.2-1B-Instruct-q4f16_1-MLC" 
-                        : "Llama-3.1-8B-Instruct-q4f32_1-MLC";
+            // Hardware Detection
+            try {
+                let gpuInfo = {};
+                if ('gpu' in navigator) {
+                     const adapter = await navigator.gpu.requestAdapter();
+                     if (adapter) gpuInfo = await (adapter as any).requestAdapterInfo?.() || {};
+                }
+                
+                // Heuristic: Apple or RTX 30/40 series -> High Power
+                const isHighPower = (gpuInfo as any).vendor === 'apple' || 
+                                    /RTX (3090|4080|4090|A6000)/i.test((gpuInfo as any).renderer || "");
+                
+                setIsLowPowerDevice(!isHighPower);
+                
+                // Model Selection Logic
+                let modelId = MODEL_LOW_POWER; // Safe fallback
+                const configModel = config.localAI.model;
 
-                    setLocalAIStatus(`Sage (Local - Loading ${lowPower ? '1B' : '8B'}...)`);
-                    
-                    // Use any cast to access context_window if not in type definition yet
-                    const contextWindow = (config as any).context_window || 8192; 
-                    
-                    console.log("[Meechi] Calling Initialize Service...", { modelId, contextWindow });
-                    
-                    await localLlmService.initialize(modelId, (progress) => {
-                         if (progress.includes("Fetching") || progress.includes("Loading")) {
-                             const match = progress.match(/(\d+)%/);
-                             if (match) {
-                                 setDownloadProgress({ percentage: parseInt(match[1]), text: progress });
-                                 setLocalAIStatus(`Deep Thinking... (Loading ${match[1]}%)`);
-                             }
-                         }
-                    }, { context_window: contextWindow });
-                    
-                    console.log("[Meechi] Initialize Service Returned!");
+                if (!configModel || configModel === 'Auto') {
+                    modelId = isHighPower ? MODEL_STANDARD : MODEL_LOW_POWER;
+                } else {
+                    modelId = configModel;
+                }
+                
+                setLoadedModel(modelId);
+
+                // Initialize WebLLM
+                if (!localLlmService.isInitialized()) {
+                    setLocalAIStatus(`Sage (Waking up ${modelId.includes('8B') ? '8B' : '1B'}...)`);
+                    await localLlmService.initialize(modelId, (p) => {
+                        if (p.includes("Fetching") || p.includes("Loading")) {
+                            const match = p.match(/(\d+)%/);
+                            if (match) {
+                                setDownloadProgress({ percentage: parseInt(match[1]), text: p });
+                                setLocalAIStatus(`Deep Thinking... (${match[1]}%)`);
+                            }
+                        }
+                    });
                     setIsReady(true);
                     setLocalAIStatus("");
                     setDownloadProgress(null);
-                } catch (err) {
-                    console.error("Meechi initialization failed:", err);
-                    setLocalAIStatus("Hibernating (Init Failed)");
+                } else {
+                    setIsReady(true);
                 }
+            } catch (e) {
+                console.error("Failed to init Local AI", e);
+                setLocalAIStatus("Hibernating (Init Failed)");
             }
-        }
-        
-        detectAndInit();
+        };
+        init();
     }, []);
 
-    // Encapsulated Chat Function
+
+    /**
+     * UNIFIED CHAT FUNCTION
+     * Handles Local -> Cloud fallback transparently.
+     * Executes MCP tools automatically.
+     */
     const chat = useCallback(async (
-        userMsg: string, 
-        history: AIChatMessage[], 
+        userMsg: string,
+        history: AIChatMessage[],
         context: string,
-        onUpdate: (chunk: string) => void
+        onUpdate: (chunk: string) => void,
+        onToolStart?: (toolName: string) => void,
+        onToolResult?: (result: string) => void
     ) => {
-        // Hybrid Logic:
-        // By default, we might use Groq (Sprint) via API route if online.
-        // But here we implement the "Sage" layer (Local).
-        // The calling component will handle the "Sprint" fallback first, 
-        // OR we can do it here.
-        // User instruction: "If Local Engine status is not 'ready', default to Groq."
-        
-        // Actually, the calling code (page.tsx) currently has the complex switching logic.
-        // We should move the LOCAL part here primarily. 
-        
-        const timestamp = new Date().toLocaleTimeString();
-        
-        try {
-            // Auto-Wait: If not ready, wait up to 60s (Model loading can be slow)
-            if (!localLlmService.isInitialized()) {
-                console.log("[Meechi] Chat called before ready. Waiting up to 60s...");
-                setLocalAIStatus("Waking up...");
-                let attempts = 0;
-                // 120 * 500ms = 60 seconds
-                while (!localLlmService.isInitialized() && attempts < 120) {
-                    if (attempts % 4 === 0) { // Log every 2 seconds
-                         console.log(`[Meechi] Still waking up... (${attempts/2}s elapsed)`);
-                    }
-                    await new Promise(r => setTimeout(r, 500));
-                    attempts++;
-                }
+        const config = await settingsManager.getConfig();
+        const useLocal = config.localAI.enabled;
+        let finalContent = "";
+
+        // 1. LOCAL AI ATTEMPT
+        if (useLocal) {
+            try {
+                // Ensure initialized
                 if (!localLlmService.isInitialized()) {
-                    throw new Error("Meechi is still waking up... Please try again in a moment.");
+                    // Quick weight...
+                    await new Promise(r => setTimeout(r, 1000));
+                    if (!localLlmService.isInitialized()) throw new Error("Local AI not ready");
                 }
-            }
 
-            // SHORT-CIRCUIT: Handle basic greetings locally to prevent hallucinations
-            // Cleaning includes removing punctuation, extra spaces, and newlines
-            const cleanMsg = userMsg.toLowerCase().replace(/[^\w\s]/g, '').trim(); 
-            console.log(`[Meechi] Checking greeting short-circuit for: "${userMsg}" -> "${cleanMsg}"`);
-            
-            // Matches "hi", "hello", "hey", "greetings", "hi meechi", "hello meechi"
-            // Using a simple split check to avoid complex regex failing on edge cases
-            const words = cleanMsg.split(/\s+/);
-            const isGreeting = (words.length <= 3) && (
-                ['hi', 'hello', 'hey', 'greetings', 'hola', 'yo'].includes(words[0])
-            );
+                // Truncate Context to prevent OOM (4096 token limit ~ 16k chars total, reserve space for prompt/history)
+                // Reduced to 6000 to be safe on 4GB VRAM GPUs (allows ~1500 tokens for RAG)
+                const MAX_CONTEXT_CHARS = 6000;
+                const safeContext = context.length > MAX_CONTEXT_CHARS 
+                    ? context.substring(0, MAX_CONTEXT_CHARS) + "\n...(truncated)" 
+                    : context;
 
-            if (isGreeting) {
-                 console.log("[Meechi] Short-circuiting greeting response.");
-                 const reply = "Hello! I am Meechi. How can I help you today?";
-                 onUpdate(reply); 
-                 return reply;
-            }
-
-            const toolPrompt = `
-IMPORTANT INSTRUCTIONS:
-1. You are Meechi, a helpful AI assistant.
-2. You have access to these tools:
-   - move_file(sourcePath, destinationPath)
-   - create_file(filePath, content)
-   - update_file(filePath, newContent, oldContent)
-   - fetch_url(url)
-   
-3. To use a tool, output a JSON object with this EXACT structure:
-   { "tool": "tool_name", "args": { ... } }
-   
-   OR use this tag format:
-   <function$tool_name{"key": "value"}>
-
-   Example: <function$fetch_url{"url": "https://example.com"}>
-
-4. PRIORITIZE CONTEXT: Check "Context" below.
-5. ANSWER MODE: If the user just says "hi" or asks a question, REPLY WITH TEXT ONLY. 
-   - DO NOT use 'update_user_settings' unless the user explicitly says "Change my name" or "Call me X".
-   - DO NOT use tools for general conversation.
-`;
-            
-            // Context Strategy: Small models ignore System Context if history is long.
-            // We inject context directly into the LAST User message for maximum attention.
-            
-            // Construct Messages
-            const messages: AIChatMessage[] = [
-                { role: 'system', content: toolPrompt },
-                 ...history.map(m => ({ 
-                     role: m.role, 
-                     // Strip out any previous tool calls from history
-                     content: m.content.replace(/<function[\s\S]*?(?:<\/function>|$)/gi, '').trim() || m.content
-                 })), 
-                { role: 'user', content: "[CONTEXT FROM FILES]\n" + context + "\n\n[USER QUESTION]\n" + userMsg }
-            ];
-
-            let fullResponse = "";
-            let tokenCount = 0;
-            const startTime = Date.now();
-
-            await localLlmService.chat(messages, (chunk) => {
-                fullResponse += chunk;
-                tokenCount++;
+                const systemMsg = `${SYSTEM_PROMPT}\n${safeContext}`;
                 
-                // POISON FILTER: Check if the model is loop-outputting the settings confirmation
-                // This happens when context is poisoned by previous errors.
-                if (fullResponse.startsWith("Settings updated") || fullResponse.startsWith("I will call you")) {
-                    console.warn("[Meechi] Detected poisoned output (Onboarding loop). Suppressing.");
-                    // We don't update the UI with this junk
-                    return;
+                // Filter out system tool reports so AI doesn't mimic them
+                // This prevents the "hallucination" where AI just prints the result text
+                const cleanHistory = history.filter(m => !m.content.startsWith('> **Tool'));
+
+                const messages: AIChatMessage[] = [
+                    { role: 'system', content: systemMsg },
+                    ...cleanHistory,
+                    { role: 'user', content: userMsg }
+                ];
+
+                await localLlmService.chat(messages, (chunk) => {
+                    finalContent += chunk;
+                    onUpdate(chunk); 
+                }, { temperature: 0.1 }); // STRICT GROUNDING: Low temp to prevent hallucinations
+                
+                console.log("[Raw AI Output]:", finalContent);
+
+                // Post-Processing: Check for Tools
+                const tools = parseLocalToolCalls(finalContent);
+                for (const tool of tools) {
+                    if (onToolStart) onToolStart(tool.name);
+                    
+                    // CHECK FOR PARSE ERROR
+                    if (tool.error) {
+                         if (onToolResult) {
+                            onToolResult(`\n> **Tool Error (${tool.name})**: Invalid JSON arguments. Please retry using strict JSON.`);
+                        }
+                        continue;
+                    }
+
+                    // EXECUTE VIA MCP SERVER
+                    const result = await mcpServer.executeTool(tool.name, tool.args);
+                    
+                    // Add result to LOCAL history for the follow-up generation
+                    const resStr = `\n> **Tool (${tool.name})**: ${result.summary || result.message || JSON.stringify(result)}`;
+                    messages.push({ role: 'user', content: resStr });
+
+                    if (onToolResult) {
+                        onToolResult(resStr);
+                    }
                 }
 
-                // Perf Check
-                const elapsed = (Date.now() - startTime) / 1000;
-                if (elapsed > 1 && (tokenCount / elapsed) < 10) {
-                     setLocalAIStatus("Sage is reflecting deeply...");
-                } else {
-                     setLocalAIStatus("");
-                }
+                // RECURSIVE FOLLOW-UP: Generate confirmation message ONLY if tools were used
+                if (tools.length > 0) {
+                    // Re-assemble messages for follow-up
+                    const followUpMessages: AIChatMessage[] = [
+                        ...messages.slice(0, messages.length - tools.length), // Original context (System + History + User)
+                        { role: 'assistant', content: finalContent }, // The tool call it just made
+                        ...messages.slice(messages.length - tools.length) // The tool results we pushed in the loop
+                    ];
 
-                onUpdate(chunk);
-            });
-            
-            // Final check before returning
-            if (fullResponse.startsWith("Settings updated") || fullResponse.startsWith("I will call you")) {
-                 return "I apologize, I seemed to be distracted. What were you asking?";
+                    await localLlmService.chat(followUpMessages, (chunk) => {
+                        // This will OVERWRITE the <function> output in the UI, which is exactly what we want
+                        // (hiding the tool call implementation detail)
+                        onUpdate(chunk); 
+                    }, { temperature: 0.1 });
+                }
+                
+                return; // Success, exit.
+
+            } catch (e) {
+                console.warn("Local AI Failed, falling back to Cloud", e);
+                // Fall through to Cloud
+            }
+        }
+
+        // 2. CLOUD AI ATTEMPT
+        try {
+            if (rateLimitCooldown && Date.now() < rateLimitCooldown) {
+                throw new Error(`Rate limit active until ${new Date(rateLimitCooldown).toLocaleTimeString()}`);
             }
 
-            return fullResponse;
+            const res = await fetch("/api/chat", {
+                method: "POST",
+                body: JSON.stringify({
+                    message: userMsg,
+                    history,
+                    context,
+                    config
+                }),
+                headers: { "Content-Type": "application/json" }
+            });
 
-        } catch (error) {
-            throw error;
+            if (!res.ok) {
+                if (res.status === 429) {
+                    const retryAfter = 60 * 1000; // Default 1m
+                    const cooldown = Date.now() + retryAfter;
+                    setRateLimitCooldown(cooldown);
+                    localStorage.setItem('michio_rate_limit_cooldown', cooldown.toString());
+                }
+                throw new Error(`Server Error: ${res.status}`);
+            }
+
+            const data = await res.json();
+            
+            // If Text Response
+            if (data.response) {
+                onUpdate(data.response);
+            }
+
+            // If Tool Calls (Cloud Format)
+            if (data.tool_calls) {
+                for (const call of data.tool_calls) {
+                    const name = call.function.name;
+                    const args = JSON.parse(call.function.arguments);
+                    
+                    if (onToolStart) onToolStart(name);
+                    
+                    // EXECUTE VIA MCP SERVER
+                    const result = await mcpServer.executeTool(name, args);
+                    
+                    if (onToolResult) {
+                        const resStr = `\n> **Tool (${name})**: ${result.summary || result.message || JSON.stringify(result)}`;
+                        onToolResult(resStr);
+                    }
+                }
+            }
+
+        } catch (e: any) {
+            onUpdate(`\n\n**Error**: ${e.message}`);
         }
-    }, [isReady]);
+
+    }, [rateLimitCooldown]);
 
     return {
-        isLowPowerDevice,
         isReady,
         localAIStatus,
         downloadProgress,
-        chat
+        chat,
+        isLowPowerDevice,
+        loadedModel
     };
 }
+

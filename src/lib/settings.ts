@@ -44,7 +44,7 @@ const DEFAULT_CONFIG: AppConfig = {
     activeProviderId: 'groq',
     localAI: {
         enabled: true,
-        model: 'Llama-3.1-8B-Instruct-q4f32_1-MLC'
+        model: 'Auto'
     },
     theme: 'system'
 };

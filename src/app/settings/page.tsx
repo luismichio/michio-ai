@@ -113,7 +113,7 @@ export default function SettingsPage() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                         <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
                             Groq (Meta Llama 3)
-                            {config.activeProviderId === 'groq' && <span style={badgeStyle}>Active</span>}
+                            {config.activeProviderId === 'groq' && groqProvider?.apiKey && <span style={badgeStyle}>Active</span>}
                         </h3>
                         <label className="switch" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem' }}>
                              Enabled
@@ -168,7 +168,7 @@ export default function SettingsPage() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                         <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
                             Google Gemini
-                            {config.activeProviderId === 'gemini' && <span style={badgeStyle}>Active</span>}
+                            {config.activeProviderId === 'gemini' && geminiProvider?.apiKey && <span style={badgeStyle}>Active</span>}
                         </h3>
                         <div style={{ display: 'flex', gap: 8 }}>
                              <button
@@ -250,14 +250,6 @@ export default function SettingsPage() {
                                 type="checkbox" 
                                 checked={config.localAI?.enabled ?? true} 
                                 onChange={e => updateLocalAI({ enabled: e.target.checked })}
-                             />
-                        </label>
-                        <label className="switch" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem' }}>
-                             Enabled
-                             <input 
-                                type="checkbox" 
-                                checked={config.localAI?.enabled ?? true} 
-                                onChange={e => updateLocalAI({ enabled: e.target.checked })}
                                 disabled={gpuSupported === false}
                              />
                         </label>
@@ -285,23 +277,24 @@ export default function SettingsPage() {
                         <label style={labelStyle}>Model</label>
                         <select 
                             style={inputStyle} 
-                            value={config.localAI?.model || 'Llama-3.1-8B-Instruct-q4f32_1-MLC'}
+                            value={config.localAI?.model || 'Auto'}
                             onChange={e => updateLocalAI({ model: e.target.value })}
                         >
-                            <option value="Llama-3.1-8B-Instruct-q4f32_1-MLC">Llama 3.1 8B Instruct (Recommended)</option>
-                            <option value="Llama-3-8B-Instruct-q4f32_1-MLC">Llama 3 8B Instruct</option>
+                            <option value="Auto">Auto (Recommended)</option>
+                            <option value="Llama-3.1-8B-Instruct-q4f32_1-MLC">Llama 3.1 8B Instruct</option>
+                            <option value="Llama-3-8B-Instruct-q4f32_1-MLC">Llama 3 8B Instruct (Old)</option>
                             <option value="Hermes-2-Pro-Llama-3-8B-q4f16_1-MLC">Hermes 2 Pro Llama 3 8B</option>
                             <option value="Phi-3-mini-4k-instruct-q4f16_1-MLC">Phi 3 Mini 4k</option>
                         </select>
                          <p style={{ fontSize: '0.8rem', color: '#666', marginTop: 4 }}>
-                            Select a model optimized for your device capabilities.
+                            Auto selects 1B model for low-power devices and 8B for high-power devices.
                         </p>
                     </div>
                 </div>
             </section>
 
             <section style={sectionStyle}>
-                <h2 style={headerStyle}>Storage Integration</h2>
+                <h2 style={headerStyle}>Storage Integration (MCP)</h2>
                 
                 {/* Google Drive Card */}
                 <div style={cardStyle}>
@@ -312,7 +305,7 @@ export default function SettingsPage() {
                                 {session && <span style={badgeStyle}>Connected</span>}
                             </h3>
                             <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', color: '#666' }}>
-                                Only accessed when you explicitly ask Meechi to read or write files.
+                                Treated as an MCP Resource. Accessed only when you explicitly ask Meechi.
                             </p>
                         </div>
                         
