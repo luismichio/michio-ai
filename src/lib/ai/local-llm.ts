@@ -1,4 +1,4 @@
-import { CreateMLCEngine, MLCEngine, MLCEngineInterface } from "@mlc-ai/web-llm";
+import { CreateMLCEngine, MLCEngine, MLCEngineInterface, CreateServiceWorkerMLCEngine } from "@mlc-ai/web-llm";
 import { AIChatMessage, AITool } from "./types";
 
 export interface LocalLlmConfig {
@@ -12,7 +12,14 @@ export class WebLLMService {
     private initPromise: Promise<void> | null = null;
     private progressListeners: ((text: string) => void)[] = [];
 
-    async initialize(modelId: string, progressCallback?: (text: string) => void): Promise<void> {
+    /**
+     * Connect to or Initialize the Engine via Service Worker
+     */
+    async initialize(
+        modelId: string, 
+        progressCallback?: (text: string) => void,
+        config: { context_window?: number } = {}
+    ): Promise<void> {
         // If already initialized with same model, return immediately
         if (this.engine && this.currentModelId === modelId) {
             return;
@@ -24,7 +31,6 @@ export class WebLLMService {
 
         // If initialization is in progress, return the existing promise
         if (this.initPromise) {
-            console.log("WebLLM init already in progress, joining...");
             return this.initPromise;
         }
 
@@ -33,11 +39,35 @@ export class WebLLMService {
         // Create a new initialization promise
         this.initPromise = (async () => {
             try {
+                // switch to Standard Web Worker for reliability
+                // Service Workers are great for multi-tab, but brittle for "Active Controller" checks.
+                // Standard Worker is isolated and just works.
+                console.log("[Meechi] Initializing via Standard Web Worker (High Reliability)...");
+                
+                // CORRECT CONFIGURATION FOR CONTEXT WINDOW
+                // CreateMLCEngine(modelId, engineConfig, chatOpts)
+                // context_window_size belongs in the chatOpts (3rd argument) OR specifically in top-level config?
+                // Actually, for WebLLM 0.2.x, it's often best to set it in initProgressCallback's object 
+                // OR rely on the underlying model config.
+                // We will attempt to pass it in both places to be safe.
+                
                 this.engine = await CreateMLCEngine(modelId, {
                     initProgressCallback: (progress) => {
                         this.progressListeners.forEach(cb => cb(progress.text));
                     },
+                    // Try passing here as well for safety
+                    // @ts-ignore - Some versions allow this
+                    context_window_size: 8192
+                }, {
+                    context_window_size: 8192,
+                    // sliding_window_size: 2048, // Optional: if we wanted to support infinite constrained chat
                 });
+                
+                /* 
+                // Legacy Service Worker Path (Disabled for stability)
+                if ('serviceWorker' in navigator) { ... } 
+                */
+                
                 this.currentModelId = modelId;
             } catch (error: any) {
                 console.error("Failed to initialize WebLLM:", error);

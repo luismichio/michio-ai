@@ -413,22 +413,39 @@ export default function FileExplorer(props: FileExplorerProps) {
         try {
             let contentToSummarize = "";
 
-            if (file.type === 'source') {
-                 // PDF Logic
-                 const originalPath = file.path.replace('.source.md', '');
-                 const pdfContent = await storage.readFile(originalPath);
+            if (file.type === 'source' || file.name.endsWith('.pdf')) {
+                 // PDF/Binary Logic
+                 let pdfContent: ArrayBuffer | undefined;
                  
-                 if (!pdfContent) throw new Error("Original PDF not found.");
-                 if (!(pdfContent instanceof ArrayBuffer)) throw new Error("Local file is not binary.");
+                 // If it's a source file, the original is at path minus .source.md
+                 // If it's a raw PDF (exposed by bug or drag/drop), path is file.path
+                 const originalPath = file.type === 'source' ? file.path.replace('.source.md', '') : file.path;
+                 
+                 const rawFile = await storage.readFile(originalPath);
+                 
+                 if (!rawFile) throw new Error("Original binary file not found.");
+                 
+                 if (rawFile instanceof ArrayBuffer) {
+                     pdfContent = rawFile;
+                 } else if (typeof rawFile === 'string') {
+                     // Should not happen for PDF, but if it does, it's corrupted or actually text
+                     throw new Error("Expected binary PDF, got text.");
+                 }
+
+                 if (!pdfContent) throw new Error("Could not read binary content.");
 
                  contentToSummarize = await extractTextFromPdf(pdfContent);
                  
                  // Prepend Source Header
-                 contentToSummarize = `## Source: ${file.name.replace(' (Source)', '')}\n\n${contentToSummarize}`; // Keep raw for now, summary added below
+                 const displayName = file.type === 'source' ? file.name.replace(' (Source)', '') : file.name;
+                 contentToSummarize = `## Source: ${displayName}\n\n${contentToSummarize}`; 
             } else {
                  // Standard File Logic
                  const raw = await storage.readFile(file.path);
-                 if (typeof raw !== 'string') throw new Error("File content is not text.");
+                 if (typeof raw !== 'string') {
+                     // If it's binary but not PDF/source managed?
+                     throw new Error("File content is binary/image. Cannot reprocess as text.");
+                 }
                  // Simplify: If it already has a summary block, strip it first?
                  // Heuristic: If starts with "> **Summary**:", remove up to "---"
                  contentToSummarize = raw;
@@ -453,7 +470,18 @@ export default function FileExplorer(props: FileExplorerProps) {
                 finalContent = `> **Summary**: ${data.summary}\n\n---\n\n${contentToSummarize}`;
             }
 
-            await storage.saveFile(file.path, finalContent);
+            // Fix: Ensure we save to the .source.md path if it was a raw PDF
+            let targetPath = file.path;
+            if (file.name.endsWith('.pdf') && !file.path.endsWith('.source.md')) {
+                targetPath = `${file.path}.source.md`;
+            }
+
+            await storage.saveFile(targetPath, finalContent);
+            
+            // Force Indexing? (Assuming saveFile triggers it via API, but let's be sure)
+            // If the user's "lawofux" wasn't found, maybe it's because it was just saved?
+            // IndexedDB update happens automatically via LiveQuery.
+            
             showAlert("Success", "Re-processing complete!");
 
         } catch (e: any) {

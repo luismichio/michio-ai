@@ -13,6 +13,7 @@ import CalendarView from './components/CalendarView';
 import { LocalStorageProvider } from '@/lib/storage/local';
 import { settingsManager } from '@/lib/settings';
 import { useSync } from '@/hooks/useSync';
+import { useMeechi } from '@/hooks/useMeechi';
 import AddSourceModal from './components/AddSourceModal';
 import FileExplorer from './components/FileExplorer';
 import SourceViewer from './components/SourceViewer';
@@ -59,12 +60,11 @@ export default function Home() {
   // Storage Provider
   const [storage] = useState(() => new LocalStorageProvider());
   
-  // Local AI Progress State
-  const [downloadProgress, setDownloadProgress] = useState<{ percentage: number, text: string } | null>(null);
-
+  // Local AI Progress State (Managed by useMeechi)
+  const meechi = useMeechi();
+  
   // Rate Limit Cooldown State (Timestamp when we can try server again)
   const [rateLimitCooldown, setRateLimitCooldown] = useState<number | null>(null);
-  const [localAIStatus, setLocalAIStatus] = useState<string>("");
 
   // Load Persisted Rate Limit on Mount
   useEffect(() => {
@@ -81,18 +81,7 @@ export default function Home() {
   }, []);
 
   // Pre-load Local AI on Mount
-  useEffect(() => {
-      async function preload() {
-          const config = await settingsManager.getConfig();
-          if (config.localAI?.enabled) {
-            console.log("Pre-loading Local AI...");
-            const localModelId = config.localAI.model || 'Llama-3.1-8B-Instruct-q4f32_1-MLC';
-            // Initialize without progress callback (silent) or handling it quietly
-            localLlmService.initialize(localModelId).catch(err => console.error("Preload failed", err));
-          }
-      }
-      preload();
-  }, []);
+  // Pre-load Local AI logic moved to useMeechi hook
 
   // Helper: Parse Rate Limit Duration
   function parseRateLimitDuration(errorMsg: string): number {
@@ -182,7 +171,24 @@ export default function Home() {
                 const content = await storage.readFile(`history/${currentDate}.md`) || "";
 
                 if (content && typeof content === 'string' && !content.startsWith("No journal")) {
-                    const parsed = parseLogToMessages(content);
+                    // SANITIZATION: Clean up any corrupted tool calls AND text hallucinations from storage
+                    // 1. Remove <function...> tags
+                    let cleanContent = content.replace(/<function[\s\S]*?(?:<\/function>|$)/gi, '');
+                    
+                    // 2. Remove "Settings updated..." repetitions (The specific phrase interfering with chat)
+                    // We look for lines starting with **Meechi**: Settings updated
+                    // regex: matches "**Meechi**: Settings updated" context
+                    cleanContent = cleanContent.replace(/^\*\*Meechi\*\*: Settings updated.*?(\n|$)/gmi, ""); 
+                    cleanContent = cleanContent.replace(/^\*\*Meechi\*\*: I will call you.*?(\n|$)/gmi, "");
+                    cleanContent = cleanContent.replace(/Settings updated\. I will call you.*?(\n|$)/gmi, "");
+
+                    // If we made changes, save it back cleaned
+                    if (cleanContent.length !== content.length) {
+                        console.log("[History] Sanitized corrupted history file (Functions + Hallucinations).");
+                        await storage.saveFile(`history/${currentDate}.md`, cleanContent);
+                    }
+
+                    const parsed = parseLogToMessages(cleanContent);
                     // Slice for "Load More" functionality (show last N)
                     const visibleMessages = parsed.slice(-historyLimit);
                     setMessages(visibleMessages);
@@ -300,6 +306,9 @@ export default function Home() {
         const localHistory = await storage.getRecentLogs(6); 
         const knowledgeContext = await storage.getKnowledgeContext(userMsg);
         
+        console.log(`[Page] RAG Retrieval for "${userMsg}":`, knowledgeContext ? `${knowledgeContext.length} chars found` : "EMPTY");
+        if (knowledgeContext) console.log("[Page] RAG Snippet:", knowledgeContext.substring(0, 200));
+
         let fullContext = `${knowledgeContext}\n\n--- Current Conversation History (Last 6h) ---\n${localHistory}`;
         
         // Inject Attachment Context
@@ -310,13 +319,40 @@ export default function Home() {
         }
 
         // 3. Call AI (Stateless - just compute)
-        // 3. Call AI (Stateless - just compute)
+        
+        // DOUBLE SHORT-CIRCUIT: Explicitly handle greetings here to save time/resources
+        // and prevent any chance of tool hallucination for simple hellos.
+        const cleanInput = userMsg.toLowerCase().replace(/[^\w\s]/g, '').trim();
+        const inputWords = cleanInput.split(/\s+/);
+        console.log(`[Page] Short-circuit check. Msg: "${userMsg}", Clean: "${cleanInput}", Words:`, inputWords);
+        
+        // Check for greetings OR simple identity questions (to avoid LLM overhead for trivialities)
+        if (inputWords.length <= 4 && (
+        ['hi', 'hello', 'hey', 'greetings', 'yo', 'hola', 'bonjour'].includes(inputWords[0]) ||
+        (inputWords[0] === 'who' && inputWords.includes('you')) ||
+        (inputWords[0] === 'what' && inputWords.includes('name'))
+        )) {
+            console.log("[Page] Triggering Short-Circuit Greeting");
+            const quickReply = "Hello! I am Meechi, your local AI assistant.";
+            setMessages(prev => [...prev, { role: 'michio', content: quickReply, timestamp: new Date().toLocaleTimeString() }]);
+            // Save to history immediately
+            await storage.appendFile(`history/${currentDate}.md`, `**Meechi**: ${quickReply}\n`);
+            setIsChatting(false);
+            scrollToBottom();
+            return;
+        }
+
         const config = await settingsManager.getConfig();
         const respTimestamp = new Date().toLocaleTimeString(); // Hoist timestamp for use in fallback
+        
+        // LOCAL-FIRST LOGIC: 
+        // 1. If Local AI is enabled -> Try Local. 
+        // 2. Fallback to Cloud only if Local fails significantly (managed separately) or if Local Disabled.
+        const useLocalFirst = config.localAI && config.localAI.enabled;
         let isFallback = false;
-
-        // Smart Rate Limit Check
-        if (rateLimitCooldown && Date.now() < rateLimitCooldown) {
+        
+        // Smart Rate Limit Check (Only relevant if we use Cloud)
+        if (!useLocalFirst && rateLimitCooldown && Date.now() < rateLimitCooldown) {
             console.warn(`[Smart Rate Limit] Skipping Server API. Cooldown active until ${new Date(rateLimitCooldown).toLocaleTimeString()}`);
             isFallback = true;
         }
@@ -324,7 +360,92 @@ export default function Home() {
         let data: any;
         let toolCalls: any[] | undefined;
         let usageData: any;
+        
+        // --- 1. LOCAL EXECUTION PATH ---
+        if (useLocalFirst) {
+             console.log("[Chat] Using Local AI (Priority)...");
+             try {
+                 const truncatedContext = fullContext.length > 3000 ? fullContext.substring(0, 3000) + "...(truncated)" : fullContext;
+                 
+                 const historyForAI: AIChatMessage[] = messages.map(m => ({ 
+                    role: m.role === 'michio' ? 'assistant' : 'user', 
+                    content: m.content 
+                 }));
 
+                 console.log("[Page] Sending to Local AI...");
+                 let currentContent = "";
+                 
+                 await meechi.chat(userMsg, historyForAI, truncatedContext, (chunk) => {
+                    currentContent += chunk;
+                    
+                    // IN-STREAM BLOCKING: Check for banned tool immediately
+                    if (currentContent.includes('update_user_settings')) {
+                        console.warn("[Local AI] In-stream BLOCK of update_user_settings");
+                        const cleanContent = currentContent.replace(/<function[\s\S]*?(?:<\/function>|$)/gi, "").trim();
+                        currentContent = cleanContent || "I heard you!";
+                    }
+
+                    setMessages(prev => {
+                        const msgs = [...prev];
+                        const last = msgs[msgs.length - 1];
+                        if (last.role === 'michio' && last.timestamp === respTimestamp) {
+                            last.content = currentContent;
+                            return msgs;
+                        } else {
+                            return [...msgs, { role: 'michio', content: currentContent, timestamp: respTimestamp }];
+                        }
+                    });
+                 });
+                 
+                 // --- POST-STREAM EXECUTION ---
+                 // If we found toolCalls during the stream, we simply let the existing logic below handle it?
+                 // NO, the existing logic is inside the `try { if(!isFallback)... }` block which we are OUTSIDE of.
+                 // We need to validly execute the tool here if `toolCalls` is populated.
+                 
+                 if (toolCalls && toolCalls.length > 0) {
+                     const call = toolCalls[0];
+                     console.log("[Local AI] Executing Tool:", call.function.name);
+                     
+                     // Execute Tool logic (Simulated here since we duplicate the Cloud logic)
+                     // Ideally we refactor 'handleToolExecution' to be shared.
+                     // For now, specifically handle 'fetch_url' which is what Sage 1B calls.
+                     if (call.function.name === 'fetch_url') {
+                         const args = JSON.parse(call.function.arguments);
+                         setMessages(prev => [...prev, { role: 'michio', content: `Checking ${args.url}...`, timestamp: respTimestamp }]);
+                         
+                         try {
+                             const fetchRes = await fetch('/api/proxy?url=' + encodeURIComponent(args.url));
+                             const text = await fetchRes.text();
+                             const snippet = text.slice(0, 1000); // Feed back first 1000 chars
+                             
+                             // Recursive call with new context? 
+                             // Or just append result. Simpler to just append result for now.
+                             setMessages(prev => [...prev, { role: 'michio', content: `**Summary from ${args.url}**:\n${snippet}...\n\n(Note: Full RAG loop not yet active for Local AI tools)`, timestamp: respTimestamp }]);
+                         } catch (e) {
+                             setMessages(prev => [...prev, { role: 'michio', content: "Failed to read that URL.", timestamp: respTimestamp }]);
+                         }
+                         setIsChatting(false);
+                         return;
+                     }
+                 }
+
+
+
+                 // Success!
+                 // SAVE TO HISTORY: (Crucial Step restored)
+                 const finalLogEntry = `### ${respTimestamp}\n**User**: ${userMsg}\n**Meechi**: ${currentContent}\n\n`;
+                 await storage.appendFile(`history/${currentDate}.md`, finalLogEntry);
+
+                 setIsChatting(false);
+                 return; 
+
+             } catch (localError: any) {
+                 console.error("Local AI failed. Attempting Cloud Fallback...", localError);
+                 // Proceed to Cloud block below
+             }
+        }
+
+        // --- 2. CLOUD EXECUTION PATH ---
         try {
             if (isFallback) {
                 throw new Error("[Smart Rate Limit] Skipping Server API");
@@ -375,41 +496,9 @@ export default function Home() {
 
             // Check Local AI Fallback
             if (config.localAI && config.localAI.enabled) {
-                setMessages(prev => [...prev, { role: 'michio', content: "⚠️ Cloud API limit reached. Switching to Local AI...", timestamp: respTimestamp }]);
-                
-                try {
-                    const localModelId = config.localAI.model || 'Llama-3.1-8B-Instruct-q4f32_1-MLC';
-                    
-                    // Ensure initialized before chatting
-                    if (!localLlmService.isInitialized()) {
-                         console.log("[Local AI] Engine not ready, initializing/waiting...");
-                         await localLlmService.initialize(localModelId, (progress) => {
-                             console.log("Local AI Progress:", progress);
-                             
-                             // Update Progress Bar & Status
-                             if (progress.includes("Fetching") || progress.includes("Loading")) {
-                                 const match = progress.match(/(\d+)%/);
-                                 if (match) {
-                                     setDownloadProgress({ percentage: parseInt(match[1]), text: progress });
-                                     setLocalAIStatus(`Thinking... (Loading Model ${match[1]}%)`);
-                                 } else {
-                                     setDownloadProgress({ percentage: 0, text: progress });
-                                     setLocalAIStatus(`Thinking... (${progress})`);
-                                 }
-                             }
-                         });
-                    }
-
-
-
-                    // Clear progress bar
-                    setDownloadProgress(null);
-
-                    // Clean up loading message
-                    setMessages(prev => prev.filter(m => !m.content.includes("Loading model") && !m.content.includes("Switching to Local AI")));
-
-                    // Construct messages for local AI
-                    const toolPrompt = `
+                 // Use Meechi Hook for Chat
+                 try {
+                     const toolPrompt = `
 IMPORTANT INSTRUCTIONS:
 1. You are Meechi, a helpful AI assistant.
 2. You have access to these tools:
@@ -417,27 +506,74 @@ IMPORTANT INSTRUCTIONS:
    - create_file(filePath, content)
    - update_file(filePath, newContent, oldContent)
    - fetch_url(url)
-   - update_user_settings(name, tone)
+   
 3. To use a tool, output ONLY a valid JSON block and nothing else.
-4. PRIORITIZE CONTEXT: If the user asks a question, check the "Context" text below FIRST. If the answer is there, just reply with text. DO NOT use fetch_url for local files (paths starting with temp/ or misc/). Only use fetch_url for external HTTP URLs.
-5. NO REPETITION: Do NOT repeat previous tool actions (like updating simple lists) unless explicitly asked again.
+4. PRIORITIZE LOCAL CONTEXT: The text below labeled "RETRIEVED LOCAL FILES" contains the actual content of the user's files. USE IT.
+   - If the user asks "Did you look at my files?", say YES and cite the file names found in the context.
+   - DO NOT say "I cannot see files". You CAN see the text of the files below.
+   - Only use 'fetch_url' if the answer is NOT in the local context and the user explicitly asks.
+5. NO REPETITION: Do NOT repeat previous tool actions.
 6. GREETINGS: If user says "hello", "hi", etc., just reply "Hello! How can I help?" DO NOT use any tools.
-7. ANSWER MODE: To answer a question, just reply with text. DO NOT use update_file or create_file to "save" the answer. Just speak. DO NOT modify .source.md files.
 `;
-                    
-                    // Truncate context to avoid overflow (Local AI has 4096 limit)
-                    const truncatedContext = fullContext.length > 3000 ? fullContext.substring(0, 3000) + "...(truncated)" : fullContext;
-                    
-                    const localHistory: AIChatMessage[] = [
-                        { role: 'system', content: `You are Michio. Context:\n${truncatedContext}${toolPrompt}` },
-                        ...messages.slice(-4).map(m => ({ role: m.role === 'michio' ? 'assistant' : 'user', content: m.content } as AIChatMessage)),
-                        { role: 'user', content: userMsg }
-                    ];
+                     // Explicitly label the context so the model knows it's from files
+                     const contextPayload = `\n\n=== RETRIEVED LOCAL FILES & HISTORY ===\n${fullContext}\n=======================================\n`;
+                     
+                     // Truncate safely
+                     const truncatedContext = contextPayload.length > 3500 ? contextPayload.substring(0, 3500) + "...(truncated)" : contextPayload;
+                     let currentContent = "";
 
-                    let currentContent = "";
-                    setLocalAIStatus("Thinking");
-                    await localLlmService.chat(localHistory, (chunk) => {
+                     const historyForAI: AIChatMessage[] = messages.map(m => ({ 
+                        role: m.role === 'michio' ? 'assistant' : 'user', 
+                        content: m.content 
+                     }));
+
+                     // (Short-circuit moved to top of handleChat)
+                     
+                     console.log("[Page] Sending to AI...");
+                     await meechi.chat(userMsg, historyForAI, truncatedContext, (chunk) => {
                         currentContent += chunk;
+                        
+                        // IN-STREAM BLOCKING: Check for banned tool immediately
+                        if (currentContent.includes('update_user_settings')) {
+                            console.warn("[Local AI] In-stream BLOCK of update_user_settings");
+                            const cleanContent = currentContent.replace(/<function[\s\S]*?(?:<\/function>|$)/gi, "").trim();
+                            currentContent = cleanContent || "I heard you!";
+                        }
+                        
+                        // TOOL DETECTION (Local 1B/8B Format: <function name="...">{args}</function>)
+                        const toolMatch = currentContent.match(/<function=\s*"([^"]+)"\s*>(.*?)<\/function>/s) || 
+                                          currentContent.match(/<function=(.*?)>(.*?)<\/function>/s) ||
+                                          // 1B often does: <function=fetch_url>{"url": "..."}</function>
+                                          currentContent.match(/<function[\s$]+(\w+)[\s$]*>(.*?)<\/function>/s); // Generic fallback
+
+                        if (toolMatch) {
+                            const [fullMatch, tName, tArgs] = toolMatch;
+                            // Clean up name
+                            const rawName = tName.replace(/["'$]/g, "").trim(); 
+                            
+                            // If we have a complete tag, valid JSON, we can parse it
+                            if (fullMatch && tArgs.trim().endsWith("}")) {
+                                try {
+                                    const args = JSON.parse(tArgs.trim());
+                                    console.log(`[Local AI] Detected Tool: ${rawName}`, args);
+                                    
+                                    // Hoist into toolCalls array for the execution block below
+                                    if (!toolCalls) toolCalls = [];
+                                    toolCalls.push({
+                                        function: {
+                                            name: rawName,
+                                            arguments: JSON.stringify(args)
+                                        }
+                                    });
+                                    
+                                    // Hide from UI
+                                    currentContent = "🔄 Analyzing external source..."; 
+                                } catch (e) {
+                                    // JSON not ready yet, keep waiting
+                                }
+                            }
+                        }
+
                         setMessages(prev => {
                             const msgs = [...prev];
                             const last = msgs[msgs.length - 1];
@@ -448,50 +584,104 @@ IMPORTANT INSTRUCTIONS:
                                 return [...msgs, { role: 'michio', content: currentContent, timestamp: respTimestamp }];
                             }
                         });
-                    });
-                     
-                    setLocalAIStatus(""); // clear status when done
-                    
-                    // Helper to extract JSON by counting braces
-                    const extractJson = (text: string): string | null => {
+                     });
+
+                    // Helper to extract JSON or Tool Tag
+                    const extractToolCall = (text: string): { raw: string, data: any } | null => {
+                        // 1. Try Standard JSON Block
                         const start = text.indexOf('{');
-                        if (start === -1) return null;
-                        
-                        let count = 0;
-                        for (let i = start; i < text.length; i++) {
-                            if (text[i] === '{') count++;
-                            if (text[i] === '}') count--;
-                            if (count === 0) {
-                                return text.substring(start, i + 1);
+                        if (start !== -1) {
+                            let count = 0;
+                            for (let i = start; i < text.length; i++) {
+                                if (text[i] === '{') count++;
+                                if (text[i] === '}') count--;
+                                if (count === 0) {
+                                    try {
+                                        const raw = text.substring(start, i + 1);
+                                        return { raw, data: JSON.parse(raw) };
+                                    } catch (e) { return null; }
+                                }
                             }
                         }
+
+                        // 2. Try <functionXname{args}> format
+                        // Simple, permissive regex that grabs everything between <function... and ...>
+                        const funcMatch = text.match(/<function(.*?)>([\s\S]*?)(?:<\/function>|$)/i) || 
+                                          text.match(/<function\W?([\w_]+)(?:.*?)>([\s\S]*?)(?:<\/function>|$)/i); // older fallback
+                                          
+                        if (funcMatch) {
+                            try {
+                                const toolName = funcMatch[1];
+                                let potentialJson = funcMatch[2].trim();
+                                let args = {};
+                                
+                                // aggressive JSON finding: ignore any garbage before the first '{'
+                                const jsonStart = potentialJson.indexOf('{');
+                                if (jsonStart !== -1) {
+                                    potentialJson = potentialJson.substring(jsonStart);
+                                    // Also check for trailing garbage after the closing '}'
+                                    const jsonEnd = potentialJson.lastIndexOf('}');
+                                    if (jsonEnd !== -1) {
+                                        potentialJson = potentialJson.substring(0, jsonEnd + 1);
+                                    }
+                                    args = JSON.parse(potentialJson);
+                                }
+                                
+                                console.log("[Local AI] Parsing fallback tool:", toolName);
+                                return { raw: funcMatch[0], data: { tool: toolName, args } };
+                            } catch (e) {
+                                console.warn("Failed to parse fallback tool args", e);
+                                // Even if parsing fails, return raw so we can strip it
+                                return { raw: funcMatch[0], data: { tool: funcMatch[1], args: {} } };
+                            }
+                        }
+                        
                         return null;
                     };
 
-                    const rawJson = extractJson(currentContent);
+                    const toolMatch = extractToolCall(currentContent);
 
-                    if (rawJson) {
+                    if (toolMatch) {
                         try {
-                            const parsed = JSON.parse(rawJson);
-                            let toolName = parsed.tool;
-                            let toolArgs = parsed.args;
+                            const { raw, data } = toolMatch;
+                            let toolName = data.tool;
+                            let toolArgs = data.args;
 
                             // Handle Flat JSON (where args are at top level)
                             if (toolName && !toolArgs) {
-                                const { tool, ...rest } = parsed;
+                                const { tool, ...rest } = data;
                                 toolArgs = rest;
                             }
 
-                            if (toolName && toolArgs) {
-                                console.log("[Local AI] Detected Tool Call:", parsed);
+                            // FORCE BLOCK: Explicitly prevent update_user_settings
+                            if (toolName === 'update_user_settings') {
+                                console.warn("[Local AI] BLOCKED hallucinated tool: update_user_settings");
+                                // Strip it from the content so usage doesn't see it
+                                const stripped = currentContent.replace(raw, "").trim();
+                                currentContent = stripped || "I heard you!"; // Fallback text if empty
+                                
+                                // Update UI to show the stripped intent
+                                setMessages(prev => {
+                                    const msgs = [...prev];
+                                    const last = msgs[msgs.length - 1];
+                                    if (last.role === 'michio' && last.timestamp === respTimestamp) {
+                                        last.content = currentContent;
+                                        return msgs;
+                                    }
+                                    return prev;
+                                });
+                                // Do NOT not add to toolCalls, effectively ignoring it
+                            }
+                            else if (toolName && toolArgs) {
+                                console.log("[Local AI] Detected Tool Call:", data);
                                 toolCalls = [{
                                     function: {
                                         name: toolName,
                                         arguments: JSON.stringify(toolArgs)
                                     }
                                 }];
-                                // Hide JSON from UI
-                                const strippedContent = currentContent.replace(rawJson, "").trim();
+                                // Hide Tool Call from UI using the ACTUAL raw string found
+                                const strippedContent = currentContent.replace(raw, "").trim();
                                 currentContent = strippedContent.replace(/```json/g, "").replace(/```/g, "").trim();
                                 
                                 if (!currentContent) currentContent = "🔄 Executing local tool...";
@@ -508,22 +698,22 @@ IMPORTANT INSTRUCTIONS:
                                 });
                             }
                         } catch (e) {
-                            console.error("[Local AI] Failed to parse tool JSON. Raw:", rawJson, e);
+                             // 'raw' variable isn't available here directly if it came from toolMatch destructuring above
+                             // But we can just log a generic error or safely skip
+                            console.error("[Local AI] Failed to parse tool execution JSON.", e);
                         }
                     }
 
-                    data = { response: currentContent }; 
-                    // toolCalls is now set if found
+                    data = { response: currentContent };
 
-                } catch (localError: any) {
+                 } catch (localError: any) {
                      console.error("Local AI failed:", localError);
-                     setMessages(prev => [...prev, { role: 'michio', content: `❌ Error: Both Cloud and Local AI failed. ${localError.message}`, timestamp: respTimestamp }]);
+                     setMessages(prev => [...prev, { role: 'michio', content: `**System**: Server rate limit reached and Local AI failed: ${localError.message}`, timestamp: respTimestamp }]);
                      setIsChatting(false);
                      return;
-                }
-
+                 }
             } else {
-                 setMessages(prev => [...prev, { role: 'michio', content: `❌ Error: ${serverError.message}`, timestamp: respTimestamp }]);
+                 setMessages(prev => [...prev, { role: 'michio', content: `**System**: Server rate limit reached. Enable Local AI in settings for free offline access.`, timestamp: respTimestamp }]);
                  setIsChatting(false);
                  return;
             }
@@ -761,10 +951,14 @@ IMPORTANT INSTRUCTIONS:
         // 4. Save Meechi Response Locally (If we have text content)
         // Check if responseText is valid and distinct from tool confirmation
         if (responseText && (!toolCalls || toolCalls.length === 0)) {
-            const michioEntry = `**Meechi**: ${responseText}\n`;
-            console.log("[Local AI] Saving response to history:", michioEntry.trim().substring(0, 50) + "...");
-            await storage.appendFile(`history/${currentDate}.md`, michioEntry);
-            console.log("[Local AI] History saved to", `history/${currentDate}.md`);
+            // Extra safety: Strip any lingering tool tags that might have slipped through
+            const cleanResponse = responseText.replace(/<function[\s\S]*?(?:<\/function>|$)/gi, '').trim();
+            if (cleanResponse) {
+                const michioEntry = `**Meechi**: ${cleanResponse}\n`;
+                console.log("[Local AI] Saving response to history:", michioEntry.trim().substring(0, 50) + "...");
+                await storage.appendFile(`history/${currentDate}.md`, michioEntry);
+                console.log("[Local AI] History saved to", `history/${currentDate}.md`);
+            }
         }
 
         // 5. Trigger Cloud Sync (if online)
@@ -833,8 +1027,8 @@ IMPORTANT INSTRUCTIONS:
       const timestamp = lines[0]?.trim(); // "10:30:00 PM"
       const body = lines.slice(1).join('\n'); // Rest of message
       
-      const userMatch = body.match(/\*\*User\*\*: ([\s\S]*?)(?=\n\*\*Michio\*\*|$)/);
-      const michioMatch = body.match(/\*\*Michio\*\*: ([\s\S]*)/);
+      const userMatch = body.match(/\*\*User\*\*: ([\s\S]*?)(?=\n\*\*Meechi\*\*|\n\*\*Michio\*\*|$)/);
+      const michioMatch = body.match(/\*\*(?:Meechi|Michio)\*\*: ([\s\S]*)/);
       
       if (userMatch && userMatch[1]) {
           msgs.push({ 
@@ -894,6 +1088,17 @@ IMPORTANT INSTRUCTIONS:
              >
                 📁
              </button>
+
+             {/* Model Indicator (Top Bar) */}
+             <div style={{ marginLeft: '1rem', fontSize: '0.75rem', opacity: 0.7, fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '0.5rem', borderLeft: '1px solid rgba(128,128,128,0.3)', paddingLeft: '1rem' }}>
+                <span title="Status">
+                    {/* Heuristic: If we are in "Waking up" state, we are definitely trying Local. */
+                     meechi.localAIStatus ? 'Sage (Local - Loading...)' : 
+                     (meechi.isReady ? (meechi.isLowPowerDevice ? 'Sage 1B (Local)' : 'Sage 8B (Local)') : 'Sage (Local)')
+                    }
+                </span>
+                {meechi.localAIStatus && <span className={styles.loadingDots}></span>}
+             </div>
         </div>
         
         <div className={styles.authBadge}>
@@ -938,7 +1143,7 @@ IMPORTANT INSTRUCTIONS:
                 
                 {!isLoadingHistory && messages.length === 0 && (
                     <div style={{ textAlign: 'center', color: '#666', marginTop: '10vh' }}>
-                        <h1>Michio</h1>
+                        <h1>Meechi</h1>
                         <p>Traveler, I am listening.</p>
                         {!session && <p style={{fontSize: '0.8rem', opacity: 0.6}}>(Guest Mode: History is saved on this device)</p>}
                     </div>
@@ -970,7 +1175,18 @@ IMPORTANT INSTRUCTIONS:
                         </div>
                         
                         {msg.role === 'michio' ? (
-                            <ReactMarkdown>{msg.content}</ReactMarkdown>
+                            <ReactMarkdown>
+                                {(() => {
+                                    const raw = msg.content;
+                                    const isStartFunc = raw.trim().startsWith('<function');
+                                    const isExec = raw.includes('Executing');
+                                    if (isStartFunc && !isExec) console.log("[Page] Deep Thinking Triggered by:", raw);
+                                    
+                                    return (isStartFunc && !isExec)
+                                        ? '🔄 Deep Thinking...' 
+                                        : raw.replace(/<function[\s\S]*?(?:<\/function>|$)/gi, '').trim() || raw
+                                })()}
+                            </ReactMarkdown>
                         ) : (
                             <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
                         )}
@@ -991,7 +1207,7 @@ IMPORTANT INSTRUCTIONS:
 
                 {isChatting && (
                     <div className={styles.michioMessage} style={{ fontStyle: 'italic', opacity: 0.5, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <span>{localAIStatus || "Thinking"}</span>
+                        <span>{meechi.localAIStatus || "Thinking"}</span>
                         <span className={styles.loadingDots}></span>
                     </div>
                 )}
@@ -1001,8 +1217,21 @@ IMPORTANT INSTRUCTIONS:
       {/* 3. Fixed Input Area */}
       <div className={styles.inputArea}>
 
+          {meechi.downloadProgress && (
+              <div style={{ textAlign: 'center', padding: '1rem', color: '#666' }}>
+                  <div style={{ marginBottom: '0.5rem', fontSize: '0.9rem' }}>{meechi.downloadProgress.text}</div>
+                  <div style={{ width: '100%', height: '4px', background: '#eee', borderRadius: '2px', overflow: 'hidden' }}>
+                      <div style={{ 
+                          width: `${meechi.downloadProgress.percentage}%`, 
+                          height: '100%', 
+                          background: '#3b82f6',
+                          transition: 'width 0.3s ease'
+                      }} />
+                  </div>
+              </div>
+          )}
 
-         {!downloadProgress && (
+         {!meechi.downloadProgress && (
 
             <form onSubmit={handleChat} className={styles.inputWrapper} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                 {/* Drag & Drop Overlay */}
@@ -1071,12 +1300,12 @@ IMPORTANT INSTRUCTIONS:
                             }
                         }}
                         onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleChat(e as any);
-                        }
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                handleChat(e as any);
+                            }
                         }}
-                        placeholder="Message Meechi... (Drag & Drop files)"
+                        placeholder={meechi.isLowPowerDevice ? "Meechi is in Low-Power mode to save your battery." : "Message Meechi... (Drag & Drop files)"}
                         className={styles.chatInput}
                         rows={1}
                     />

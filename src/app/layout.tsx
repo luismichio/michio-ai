@@ -7,6 +7,7 @@ export const metadata: Metadata = {
 };
 
 import { AuthProvider } from './components/AuthProvider';
+import ServiceWorkerManager from './components/ServiceWorkerManager';
 
 import { Inter, Lora } from 'next/font/google';
 import { ThemeProvider } from '@/providers/theme-provider';
@@ -33,12 +34,13 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning className={`${inter.variable} ${lora.variable}`}>
       <body suppressHydrationWarning>
-        <ThemeProvider
+          <ThemeProvider
             attribute="class"
             defaultTheme="system"
             enableSystem
             disableTransitionOnChange
         >
+          <ServiceWorkerManager />
           <AuthProvider>{children}</AuthProvider>
         </ThemeProvider>
       </body>

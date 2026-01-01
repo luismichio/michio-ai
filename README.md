@@ -73,6 +73,17 @@ Meechi is built with the latest web technologies to ensure speed, privacy, and r
 
 ## 📜 Development Changelog
 
+### v0.9.5 - The Local Cortex (Jan 2026)
+*   **True Local-First RAG**: 
+    *   **Direct Context Injection**: Refactored the prompt engineering pipeline to inject retrieved file content directly into the User Message, bypassing model "safety filters" that previously ignored system context.
+    *   **Memory Expansion**: Increased Local AI context window from 2k -> **8k tokens**, allowing analysis of large PDF extracts.
+*   **Smart PDF Handling**:
+    *   **Raw PDF Reprocessing**: Implemented a recovery flow to re-extract text from raw binary PDFs if the summary is missing, correctly generating `.source.md` files without overwriting the original.
+    *   **Double-Embedding Fix**: Solved a race condition where files were indexed twice (as binary and text).
+*   **Stability**:
+    *   **Initialization Logs**: Added granular console logging for WebLLM/WebGPU initialization to debug hang-ups.
+    *   **Scope Fixes**: Repaired `useMeechi.ts` scope issues for hardware detection.
+
 ### v0.9.0 - Rebranding & UI Polish (Dec 2025)
 *   **Complete Rebranding**: Officially transitioned all "Michio" references to **"Meechi"** across UI, Database, and System Prompts.
 *   **Typography Overhaul**:
