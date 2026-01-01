@@ -1,6 +1,6 @@
 import { StorageProvider, FileMeta } from './types';
 import { db, FileChunk } from './db';
-import { migrateFromIdbToDexie } from './migrate';
+import { migrateFromIdbToDexie, migrateJournal } from './migrate';
 import { generateEmbedding, chunkText, cosineSimilarity } from '../ai/embeddings';
 
 export class LocalStorageProvider implements StorageProvider {
@@ -13,6 +13,7 @@ export class LocalStorageProvider implements StorageProvider {
     async init() {
         // Run migration logic once on init
         await migrateFromIdbToDexie();
+        await migrateJournal();
     }
 
     async indexFile(path: string, content: string) {

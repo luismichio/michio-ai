@@ -7,7 +7,8 @@ const PDFJS_VERSION = '5.4.530';
 export async function extractTextFromPdf(data: ArrayBuffer): Promise<string> {
     // Dynamic import to avoid SSR crashes with DOMMatrix/Canvas
     const pdfjsLib = await import('pdfjs-dist');
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`;
+    // Use local worker for offline support and speed
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
     try {
         const loadingTask = pdfjsLib.getDocument({ data });

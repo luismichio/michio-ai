@@ -5,7 +5,6 @@ import { AIChatMessage } from "@/lib/ai/types";
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import { useState, useRef, useEffect } from "react";
-import GuestJournal from './components/GuestJournal';
 import styles from './page.module.css';
 import CalendarView from './components/CalendarView';
 
@@ -128,70 +127,7 @@ export default function Home() {
     }
   }, [chatInput]);
 
-  // Auto-scroll on message update
-  useEffect(() => {
-      scrollToBottom();
-  }, [messages]);
 
-  // Load history (Run once on mount/date change - then Sync keeps it updated)
-  useEffect(() => {
-    async function load() {
-        if (currentDate) {
-            setIsLoadingHistory(true);
-            try {
-                // Always init storage first
-                await storage.init();
-                const content = await storage.readFile(`history/${currentDate}.md`) || "";
-
-                if (content && typeof content === 'string' && !content.startsWith("No journal")) {
-                    // SANITIZATION: Clean up any corrupted tool calls AND text hallucinations from storage
-                    // 1. Remove <function...> tags
-                    let cleanContent = content.replace(/<function[\s\S]*?(?:<\/function>|$)/gi, '');
-                    
-                    // 2. Remove "Settings updated..." repetitions (The specific phrase interfering with chat)
-                    // We look for lines starting with **Meechi**: Settings updated
-                    // regex: matches "**Meechi**: Settings updated" context
-                    cleanContent = cleanContent.replace(/^\*\*Meechi\*\*: Settings updated.*?(\n|$)/gmi, ""); 
-                    cleanContent = cleanContent.replace(/^\*\*Meechi\*\*: I will call you.*?(\n|$)/gmi, "");
-                    cleanContent = cleanContent.replace(/Settings updated\. I will call you.*?(\n|$)/gmi, "");
-
-                    // If we made changes, save it back cleaned
-                    if (cleanContent.length !== content.length) {
-                        console.log("[History] Sanitized corrupted history file (Functions + Hallucinations).");
-                        await storage.saveFile(`history/${currentDate}.md`, cleanContent);
-                    }
-
-                    const parsed = parseLogToMessages(cleanContent);
-                    // Slice for "Load More" functionality (show last N)
-                    const visibleMessages = parsed.slice(-historyLimit);
-                    setMessages(visibleMessages);
-                    
-                    if (visibleMessages.length > 0 && !hasScrolledRef.current) {
-                        scrollToBottom();
-                        hasScrolledRef.current = true;
-                    }
-                } else {
-                    setMessages([]);
-                    // Onboarding Check (Only if no history today and we are seemingly new)
-                    const config = await settingsManager.getConfig();
-                    if (config.identity.name === 'Traveler') {
-                         setMessages([{
-                             role: 'michio',
-                             content: "Hello! I am Michio, your personal cognitive partner. We haven't been properly introduced yet. What should I call you?",
-                             timestamp: new Date().toLocaleTimeString()
-                         }]);
-                    }
-                }
-            } catch (err) {
-                console.error("Failed to load history", err);
-            } finally {
-                setIsLoadingHistory(false);
-            }
-        }
-
-    }
-    load();
-  }, [currentDate, storage, historyLimit]); // Added historyLimit dependency
 
   // Helper: Summary with Fallback
   async function summarizeWithFallback(content: string): Promise<string | null> {
@@ -361,13 +297,30 @@ export default function Home() {
       }
   };
 
+
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // Helper to scroll to bottom
-  function scrollToBottom() {
-    setTimeout(() => {
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    // Clear any pending scroll timeouts to avoid conflicts
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+
+    scrollTimeoutRef.current = setTimeout(() => {
         if (streamRef.current) {
-            streamRef.current.scrollTop = streamRef.current.scrollHeight;
+            streamRef.current.scrollTo({
+                top: streamRef.current.scrollHeight,
+                behavior: behavior
+            });
         }
-    }, 10);
+    }, 50); // Small delay to ensure layout is done
+  };
+
+  const handleScroll = () => {
+      if (!streamRef.current) return;
+      const { scrollTop, scrollHeight, clientHeight } = streamRef.current;
+      const isAtBottom = scrollHeight - scrollTop <= clientHeight + 100; // 100px threshold
+      setShowScrollButton(!isAtBottom);
   };
 
   function parseLogToMessages(log: string) {
@@ -411,6 +364,75 @@ export default function Home() {
     return msgs;
   }
 
+  // Effect: Auto-scroll on new messages
+  useEffect(() => {
+      if (messages.length === 0) return;
+
+      const isUserMsg = messages[messages.length - 1].role === 'user';
+      
+      // If it's the User's message, we always smooth scroll to acknowledge it.
+      if (isUserMsg) {
+         scrollToBottom('smooth');
+      } 
+      // If it's the FIRST load (hasn't scrolled yet), we INSTANT scroll (behavior: auto).
+      else if (!hasScrolledRef.current) {
+         scrollToBottom('instant'); // 'instant' or 'auto'
+         hasScrolledRef.current = true;
+      }
+      // If none of the above (e.g. AI streaming), preserve standard behavior
+      // (Scroll if near bottom)
+      else if (streamRef.current) {
+           const { scrollTop, scrollHeight, clientHeight } = streamRef.current;
+           const isAtBottom = scrollHeight - scrollTop <= clientHeight + 150;
+           if (isAtBottom) scrollToBottom('smooth');
+      }
+  }, [messages]);
+
+  // Effect: Initial Load
+  useEffect(() => {
+    async function load() {
+        if (currentDate) {
+            setIsLoadingHistory(true);
+            try {
+                await storage.init();
+                const content = await storage.readFile(`history/${currentDate}.md`) || "";
+
+                if (content && typeof content === 'string' && !content.startsWith("No journal")) {
+                    // SANITIZATION
+                    let cleanContent = content.replace(/<function[\s\S]*?(?:<\/function>|$)/gi, '');
+                    cleanContent = cleanContent.replace(/^\*\*Meechi\*\*: Settings updated.*?(\n|$)/gmi, ""); 
+                    cleanContent = cleanContent.replace(/^\*\*Meechi\*\*: I will call you.*?(\n|$)/gmi, "");
+                    cleanContent = cleanContent.replace(/Settings updated\. I will call you.*?(\n|$)/gmi, "");
+
+                    if (cleanContent.length !== content.length) {
+                        await storage.saveFile(`history/${currentDate}.md`, cleanContent);
+                    }
+
+                    const parsed = parseLogToMessages(cleanContent);
+                    const visibleMessages = parsed.slice(-historyLimit);
+                    setMessages(visibleMessages);
+                    // (Scroll is handled by the useEffect above triggers on 'messages')
+                } else {
+                    setMessages([]);
+                    const config = await settingsManager.getConfig();
+                    if (config.identity.name === 'Traveler') {
+                         setMessages([{
+                             role: 'michio',
+                             content: "Hello! I am Michio, your personal cognitive partner. We haven't been properly introduced yet. What should I call you?",
+                             timestamp: new Date().toLocaleTimeString()
+                         }]);
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to load history", err);
+            } finally {
+                setIsLoadingHistory(false);
+            }
+        }
+    }
+    load();
+  }, [currentDate, storage, historyLimit]);
+
   return (
     <main className={styles.main}>
       {/* 1. Header */}
@@ -448,9 +470,9 @@ export default function Home() {
                     opacity: 0.7
                 }}
                 title="File Explorer"
-             >
+            >
                 📁
-             </button>
+            </button>
 
              {/* Model Indicator (Top Bar) */}
              <div style={{ marginLeft: '1rem', fontSize: '0.75rem', opacity: 0.7, fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '0.5rem', borderLeft: '1px solid rgba(128,128,128,0.3)', paddingLeft: '1rem' }}>
@@ -495,8 +517,12 @@ export default function Home() {
       </header>
       
       {/* 2. Scrollable Chat Stream */}
-      <div className={styles.chatContainer} ref={streamRef}>
-             <div className={styles.chatStream}>
+      <div 
+        className={styles.chatContainer} 
+        ref={streamRef}
+        onScroll={handleScroll}
+      >
+             <div className={styles.chatStream} style={{ opacity: isLoadingHistory && !hasScrolledRef.current ? 0 : 1, transition: 'opacity 0.2s ease' }}>
                 {isLoadingHistory && messages.length === 0 && (
                     <div style={{ display: 'flex', justifyContent: 'center', marginTop: '20vh' }}>
                         <div style={{ width: 20, height: 20, border: '2px solid #3b82f6', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
@@ -607,7 +633,34 @@ export default function Home() {
              </div>
       </div>
 
+       {/* Floating Scroll Button */}
+       {showScrollButton && (
+          <button 
+            onClick={() => scrollToBottom('smooth')}
+            style={{
+                position: 'fixed',
+                bottom: '100px',
+                right: '30px',
+                width: '40px',
+                height: '40px',
+                borderRadius: '50%',
+                background: '#3b82f6',
+                color: 'white',
+                border: 'none',
+                boxShadow: '0 4px 6px rgba(0,0,0,0.2)',
+                cursor: 'pointer',
+                zIndex: 50,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '1.2rem'
+            }}
+            title="Scroll to Bottom"
+          >
+              ↓
+          </button>
+      )}
+
       {/* 3. Fixed Input Area */}
+
       <div className={styles.inputArea}>
 
           {meechi.downloadProgress && (

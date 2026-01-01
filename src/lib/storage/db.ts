@@ -22,10 +22,17 @@ export interface FileChunk {
     embedding: number[]; // 512 dimensions (TensorFlow.js Universal Sentence Encoder)
 }
 
+export interface JournalEntry {
+    id?: number;
+    content: string;
+    createdAt: Date;
+}
+
 export class MeechiDB extends Dexie {
     files!: Table<FileRecord>;
     settings!: Table<SettingRecord>;
     chunks!: Table<FileChunk>;
+    journal!: Table<JournalEntry>;
 
     constructor() {
         super('michio-db');
@@ -48,9 +55,15 @@ export class MeechiDB extends Dexie {
             });
         });
 
+
         // Add semantic chunks table in version 4
         this.version(4).stores({
             chunks: '++id, filePath'
+        });
+
+        // Add journal table in version 5
+        this.version(5).stores({
+            journal: '++id, createdAt'
         });
     }
 }

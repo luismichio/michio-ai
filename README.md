@@ -107,6 +107,18 @@ Meechi is built with the latest web technologies to ensure speed, privacy, and r
     *   **Chat Layout**: Improved visual separation between User (Right) and Meechi (Left) messages.
     *   **Legibility**: Standardized base font size to 16px with optimized line-height (1.6).
 
+
+### v0.9.0 - Codebase Cleanup & UI Polish (Jan 2026)
+*   **Smart Scroll v2**:
+    *   **Instant Load**: Chat history now loads instantly without visual "jumping" or animation.
+    *   **Floating Scroll Button**: Added a "Scroll to Bottom" button for easy navigation when reading history.
+    *   **Auto-Scroll**: Smooth scrolling for new messages while respecting user's read position.
+*   **Offline Optimization**:
+    *   **Local PDF Parser**: Moved the PDF worker to local storage, removing the dependency on external CDNs. This enables **True Offline** PDF reading.
+*   **Codebase Hygiene**:
+    *   **Ghost Busting**: Removed legacy code (`GuestJournal`, `lib/gemini.ts`) and unified the database architecture into `MeechiDB`.
+    *   **Migration**: Added automated migration to ensure old journal entries are preserved during the upgrade.
+
 ### v0.8.0 - The Meechi Rebrand (Dec 2025)
 *   **Identity**: Transitioned to "Meechi" with the Sage & Paper design language.
 *   **Typography**: Adopted Inter (Headings) and Merriweather (Content) for a book-like reading experience.
