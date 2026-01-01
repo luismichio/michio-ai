@@ -3,57 +3,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { localLlmService } from '@/lib/ai/local-llm';
 import { settingsManager, AppConfig } from '@/lib/settings';
 import { AIChatMessage } from '@/lib/ai/types';
-import { SYSTEM_PROMPT } from '@/lib/ai/prompts';
+import { SYSTEM_PROMPT, RESEARCH_SYSTEM_PROMPT } from '@/lib/ai/prompts';
 import { mcpServer } from '@/lib/mcp/McpServer';
-
-// Constants for Models
-const MODEL_LOW_POWER = 'Llama-3.2-1B-Instruct-q4f16_1-MLC';
-const MODEL_STANDARD = 'Llama-3.1-8B-Instruct-q4f32_1-MLC';
-
-// Helper to parse tool calls from text (Local 1B/8B format)
-function parseLocalToolCalls(content: string) {
-    const tools = [];
-    
-    // Regex for <function="name">{args}</function> or <function name='name'>{args}</function>
-    const toolRegex = /<function(?:=\s*["']?([^"'>]+)["']?|\s+name=["']?([^"'>]+)["']?)\s*>([\s\S]*?)<\/function>/g;
-    let match;
-    while ((match = toolRegex.exec(content)) !== null) {
-        const name = (match[1] || match[2]).replace(/["']/g, "").trim();
-        const argsStr = match[3].trim();
-        try {
-            // Attempt 1: Strict JSON
-            const args = JSON.parse(argsStr);
-            tools.push({ name, args, raw: match[0] });
-        } catch (e) {
-            try {
-                // Attempt 2: Sanitize Newlines in Strings (Common LLM error)
-                // Regex matches double-quoted strings and escapes unescaped newlines inside them
-                const sanitized = argsStr.replace(/"((?:[^"\\]|\\.)*)"/g, (match) => {
-                     // Replace literal newlines with escaped newlines
-                    return match.replace(/\n/g, "\\n").replace(/\r/g, "");
-                });
-                const args = JSON.parse(sanitized);
-                tools.push({ name, args, raw: match[0] });
-            } catch (e2) {
-                // Attempt 3: Relaxed + Sanitized (Desperate fallback)
-                try {
-                    const fixed = argsStr
-                        .replace(/'/g, '"') // Replace single quotes
-                        .replace(/,\s*}/g, '}') // Remove trailing comma
-                        // Sanitize newlines in the now-double-quoted strings
-                        .replace(/"((?:[^"\\]|\\.)*)"/g, (m) => m.replace(/\n/g, "\\n").replace(/\r/g, ""));
-                    
-                    const args = JSON.parse(fixed);
-                    tools.push({ name, args, raw: match[0] });
-                } catch (e3) {
-                    console.error(`Failed to parse args for tool ${name}`, argsStr);
-                    tools.push({ name, args: {}, error: "Invalid JSON arguments", raw: match[0] });
-                }
-            }
-        }
-    }
-    return tools;
-}
+import { AVAILABLE_MODELS } from '@/lib/ai/registry';
+import { parseToolCalls } from '@/lib/ai/parsing';
 
 export function useMeechi() {
     const [isLowPowerDevice, setIsLowPowerDevice] = useState(true);
@@ -91,21 +44,40 @@ export function useMeechi() {
                 
                 setIsLowPowerDevice(!isHighPower);
                 
-                // Model Selection Logic
-                let modelId = MODEL_LOW_POWER; // Safe fallback
+                // Model Selection Logic via Registry
+                // Model Selection Logic via Registry
+                // Default: 1B for Low Power, 8B for High Power
+                const defaultLow = AVAILABLE_MODELS.find(m => m.low_power && m.family === 'llama')!.id;
+                // const defaultHigh = AVAILABLE_MODELS.find(m => !m.low_power && m.family === 'llama')!.id;
+                
+                let modelId = defaultLow; 
                 const configModel = config.localAI.model;
 
                 if (!configModel || configModel === 'Auto') {
-                    modelId = isHighPower ? MODEL_STANDARD : MODEL_LOW_POWER;
+                    // FORCE 1B Default (User Request: "Make the 1B the default")
+                    // We ignore high power detection for stability.
+                    modelId = defaultLow;
                 } else {
-                    modelId = configModel;
+                    // Check if the configModel exists in registry, otherwise fallback
+                    const exists = AVAILABLE_MODELS.find(m => m.id === configModel);
+                    modelId = exists ? exists.id : configModel;
                 }
                 
                 setLoadedModel(modelId);
 
+                setLoadedModel(modelId);
+
                 // Initialize WebLLM
-                if (!localLlmService.isInitialized()) {
-                    setLocalAIStatus(`Sage (Waking up ${modelId.includes('8B') ? '8B' : '1B'}...)`);
+                const currentId = localLlmService.getModelId();
+                const needsInit = !localLlmService.isInitialized() || (currentId !== modelId);
+
+                if (needsInit) {
+                    if (currentId && currentId !== modelId) {
+                        setLocalAIStatus(`Switching to ${modelId.includes('8B') ? '8B' : '1B'}...`);
+                    } else {
+                        setLocalAIStatus(`Sage (Waking up ${modelId.includes('8B') ? '8B' : '1B'}...)`);
+                    }
+                    
                     await localLlmService.initialize(modelId, (p) => {
                         if (p.includes("Fetching") || p.includes("Loading")) {
                             const match = p.match(/(\d+)%/);
@@ -130,6 +102,9 @@ export function useMeechi() {
     }, []);
 
 
+    // State for Modes
+    const [mode, setMode] = useState<'log' | 'chat' | 'research'>('log');
+
     /**
      * UNIFIED CHAT FUNCTION
      * Handles Local -> Cloud fallback transparently.
@@ -143,48 +118,87 @@ export function useMeechi() {
         onToolStart?: (toolName: string) => void,
         onToolResult?: (result: string) => void
     ) => {
+        // MD 1. SHIP'S LOG MODE (Default)
+        // In this mode, we do NOT invoke the AI. The UI should still allow saving the user message.
+        if (mode === 'log') {
+            onUpdate(""); // No AI response
+            return;
+        }
+
         const config = await settingsManager.getConfig();
         const useLocal = config.localAI.enabled;
         let finalContent = "";
+        let userContentToUse = userMsg; // Default to raw user message
 
-        // 1. LOCAL AI ATTEMPT
+        // 2. PREPARE CONTEXT BASED ON MODE
+        let systemMsg = SYSTEM_PROMPT;
+        let temp = 0.7; // Default "Chat" (Creative)
+
+        if (mode === 'research') {
+             // STRICT RESEARCH MODE
+             // 1. Use Context (RAG)
+             // 2. Low Temperature (Zero Hallucination)
+             temp = 0.3;
+             
+             // Truncate Context to prevent OOM
+             const MAX_CONTEXT_CHARS = 5000;
+             const safeContext = context.length > MAX_CONTEXT_CHARS 
+                ? context.substring(0, MAX_CONTEXT_CHARS) + "\n...(truncated)" 
+                : context;
+            
+             // Override System Prompt with specialized Research Prompt
+             console.log("[Meechi Research Context]", safeContext); // DEBUG: Ensure context is correct
+             systemMsg = RESEARCH_SYSTEM_PROMPT;
+             
+             // CRITICAL FIX: Inject Context into the USER message.
+             // Small models (1B) pay more attention to the immediate user prompt than the system prompt.
+             userContentToUse = `### RETRIEVED SOURCES\n${safeContext}\n\n### USER QUESTION\n${userMsg}`;
+        } else {
+            // CASUAL CHAT MODE
+            // 1. IGNORE RAG Context (unless explicitly asked? For now, pure chat as requested)
+            // 2. High Temperature (Creative)
+            systemMsg = SYSTEM_PROMPT; 
+        }
+
+        // 3. LOCAL AI ATTEMPT
         if (useLocal) {
+            // Guard: If Local AI is enabled but not ready, stop.
+            if (!isReady) {
+                 onUpdate("\n\n*Meechi is warming up... (Please wait for 'Ready' status)*");
+                 return;
+            }
+
             try {
-                // Ensure initialized
+                // Ensure initialized (Double check)
                 if (!localLlmService.isInitialized()) {
-                    // Quick weight...
-                    await new Promise(r => setTimeout(r, 1000));
-                    if (!localLlmService.isInitialized()) throw new Error("Local AI not ready");
+                    await localLlmService.initialize(config.localAI.model);
                 }
 
-                // Truncate Context to prevent OOM (4096 token limit ~ 16k chars total, reserve space for prompt/history)
-                // Reduced to 6000 to be safe on 4GB VRAM GPUs (allows ~1500 tokens for RAG)
-                const MAX_CONTEXT_CHARS = 6000;
-                const safeContext = context.length > MAX_CONTEXT_CHARS 
-                    ? context.substring(0, MAX_CONTEXT_CHARS) + "\n...(truncated)" 
-                    : context;
-
-                const systemMsg = `${SYSTEM_PROMPT}\n${safeContext}`;
-                
                 // Filter out system tool reports so AI doesn't mimic them
                 // This prevents the "hallucination" where AI just prints the result text
-                const cleanHistory = history.filter(m => !m.content.startsWith('> **Tool'));
+                // ALSO FILTER ERROR MESSAGES so AI doesn't repeat them
+                const cleanHistory = history.filter(m => 
+                    !m.content.startsWith('> **Tool') && 
+                    !m.content.startsWith('**Error**') &&
+                    !m.content.startsWith('Error:')
+                );
 
                 const messages: AIChatMessage[] = [
                     { role: 'system', content: systemMsg },
                     ...cleanHistory,
-                    { role: 'user', content: userMsg }
+                    { role: 'user', content: userContentToUse } 
                 ];
 
                 await localLlmService.chat(messages, (chunk) => {
                     finalContent += chunk;
                     onUpdate(chunk); 
-                }, { temperature: 0.1 }); // STRICT GROUNDING: Low temp to prevent hallucinations
+                }, { temperature: temp });
                 
-                console.log("[Raw AI Output]:", finalContent);
+                console.log(`[Raw AI Output (${mode})]:`, finalContent);
 
-                // Post-Processing: Check for Tools
-                const tools = parseLocalToolCalls(finalContent);
+                // Post-Processing: Check for Tools (Using centralized parser)
+                // Tools are technically allowed in both modes, but usually Research uses them more.
+                const tools = parseToolCalls(finalContent);
                 for (const tool of tools) {
                     if (onToolStart) onToolStart(tool.name);
                     
@@ -221,14 +235,45 @@ export function useMeechi() {
                         // This will OVERWRITE the <function> output in the UI, which is exactly what we want
                         // (hiding the tool call implementation detail)
                         onUpdate(chunk); 
-                    }, { temperature: 0.1 });
+                    }, { temperature: temp });
                 }
                 
                 return; // Success, exit.
 
-            } catch (e) {
-                console.warn("Local AI Failed, falling back to Cloud", e);
-                // Fall through to Cloud
+            } catch (e: any) {
+                console.warn("Local AI Failed.", e);
+                
+                // CRITICAL FAIL-SAFE:
+                const activeId = config.activeProviderId || 'groq';
+                const activeProvider = config.providers.find(p => p.id === activeId);
+                
+                // Strict check: Ensure apiKey is a non-empty string
+                const rawKey = activeProvider?.apiKey;
+                const hasCloudKey = (rawKey && rawKey.trim().length > 0) || (activeId === 'openai' && !!process.env.NEXT_PUBLIC_OPENAI_KEY_EXISTS); 
+
+                console.log("[Meechi Fallback Debug]", { 
+                    error: e.message, 
+                    activeId, 
+                    hasCloudKey, 
+                    rawKeyLength: rawKey?.length 
+                });
+
+                // If it was a GPU Crash, handle it specifically
+                if (e.message === 'GPU_CRASH' || e.message.includes('Device was lost')) {
+                    setLocalAIStatus("GPU Crashed (Reload Required)");
+                    onUpdate(`\n\n**System Alert**: Local AI GPU Driver Crashed.\n- Please reload or check Settings to ensure '1B' model is selected.`);
+                    return; // STOP. Do not fallback.
+                }
+
+                // If regular error but NO Cloud Key, STOP.
+                if (!hasCloudKey) {
+                    setLocalAIStatus("Error (No Cloud Fallback)");
+                    onUpdate(`\n\n**Error**: Local AI failed. Cloud fallback skipped (No Key).\n\n**Reason**: ${e.message}`);
+                    return; // STOP.
+                }
+                
+                // Otherwise, fall through to Cloud
+                console.log("Attempting Cloud Fallback (Key Found)...");
             }
         }
 
@@ -285,10 +330,18 @@ export function useMeechi() {
             }
 
         } catch (e: any) {
-            onUpdate(`\n\n**Error**: ${e.message}`);
+            // Handle GPU Crash specifically
+            if (e.message === 'GPU_CRASH' || e.message.includes('Device was lost')) {
+                setLocalAIStatus("GPU Crashed (Reloading...)");
+                // Optional: Auto-switch to lighter model? 
+                // For now, just let the user know they need to reload or it will retry next time.
+                onUpdate(`\n\n**System Alert**: The GPU driver crashed. Please refresh the page to restore AI functionality.`);
+            } else {
+                onUpdate(`\n\n**Error**: ${e.message}`);
+            }
         }
 
-    }, [rateLimitCooldown]);
+    }, [rateLimitCooldown, mode, isLowPowerDevice, loadedModel]);
 
     return {
         isReady,
@@ -296,7 +349,9 @@ export function useMeechi() {
         downloadProgress,
         chat,
         isLowPowerDevice,
-        loadedModel
+        loadedModel,
+        mode,
+        setMode
     };
 }
 

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useSession, signIn, signOut } from "next-auth/react";
 import { settingsManager, AppConfig, AIProviderConfig } from '@/lib/settings';
 import { LocalStorageProvider } from '@/lib/storage/local';
+import { AVAILABLE_MODELS } from '@/lib/ai/registry';
 
 export default function SettingsPage() {
     const { data: session } = useSession();
@@ -280,14 +281,15 @@ export default function SettingsPage() {
                             value={config.localAI?.model || 'Auto'}
                             onChange={e => updateLocalAI({ model: e.target.value })}
                         >
-                            <option value="Auto">Auto (Recommended)</option>
-                            <option value="Llama-3.1-8B-Instruct-q4f32_1-MLC">Llama 3.1 8B Instruct</option>
-                            <option value="Llama-3-8B-Instruct-q4f32_1-MLC">Llama 3 8B Instruct (Old)</option>
-                            <option value="Hermes-2-Pro-Llama-3-8B-q4f16_1-MLC">Hermes 2 Pro Llama 3 8B</option>
-                            <option value="Phi-3-mini-4k-instruct-q4f16_1-MLC">Phi 3 Mini 4k</option>
+                            <option value="Auto">Auto (Default: 1B)</option>
+                            {AVAILABLE_MODELS.map(m => (
+                                <option key={m.id} value={m.id}>
+                                    {m.name} ({Math.round(m.vram_required_mb / 1024)}GB VRAM)
+                                </option>
+                            ))}
                         </select>
                          <p style={{ fontSize: '0.8rem', color: '#666', marginTop: 4 }}>
-                            Auto selects 1B model for low-power devices and 8B for high-power devices.
+                            Select 'Llama 3.2 1B' for maximum speed and stability.
                         </p>
                     </div>
                 </div>

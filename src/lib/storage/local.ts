@@ -418,16 +418,59 @@ export class LocalStorageProvider implements StorageProvider {
                     similarity: cosineSimilarity(queryEmbedding, chunk.embedding)
                 })).sort((a, b) => b.similarity - a.similarity);
 
-                // Take top 5 relevant chunks
-                const topChunks = ranked.slice(0, 5).filter(r => r.similarity > 0.1); // 0.1 threshold to avoid noise
+                // FILENAME BOOSTING
+                // If the user explicitly mentions a file (e.g. "Schema Theory"), we MUST include it regardless of vector score.
+                const queryLower = query.toLowerCase();
+                const boostedChunks: typeof ranked = [];
+                const seenChunkIds = new Set<string>();
+
+                // 1. Find matched files
+                const allFiles = await db.files.toArray();
+                const matchedFiles = allFiles.filter(f => {
+                   if (!f.path.startsWith('misc/')) return false;
+                   const filename = f.path.split('/').pop()?.toLowerCase() || "";
+                   // Boosting Logic: If filename is found in query OR query is found in filename
+                   // (ignoring very short queries)
+                   if (queryLower.length > 3 && filename.includes(queryLower)) return true;
+                   if (filename.length > 3 && queryLower.includes(filename)) return true;
+                   return false;
+                });
+
+                if (matchedFiles.length > 0) {
+                     console.log(`[RAG] Filename Match Found: ${matchedFiles.map(f => f.path).join(', ')}`);
+                     // Get all chunks for these files
+                     for (const file of matchedFiles) {
+                         const fileChunks = allChunks.filter(c => c.filePath === file.path);
+                         for (const c of fileChunks) {
+                             if (!seenChunkIds.has(c.content)) { // simple content dedup
+                                 boostedChunks.push({ chunk: c, similarity: 1.0 }); // Artificially high score
+                                 seenChunkIds.add(c.content);
+                             }
+                         }
+                     }
+                }
+
+                // 2. Select Top Chunks (Boosted + Semantic)
+                const semanticChunks = ranked.filter(r => r.similarity > 0.1 && !seenChunkIds.has(r.chunk.content));
                 
-                if (topChunks.length === 0) {
+                // Combine: Boosted first, then highest semantic
+                // Total Limit: 8 chunks (approx 2k tokens)
+                const combined = [...boostedChunks, ...semanticChunks].slice(0, 8);
+                
+                if (combined.length === 0) {
                     return "--- Knowledge Base ---\nNo relevant files found for this query.\n";
                 }
 
                 let ctx = "--- Relevant Memory (Semantic Search) ---\n";
-                for (const item of topChunks) {
-                    ctx += `\n[From: ${item.chunk.filePath}]\n${item.chunk.content}\n---\n`;
+                for (const item of combined) {
+                    // Normalize filename for the AI: remove path and extension
+                    // "misc/Research/Foo.pdf" -> "Foo"
+                    const rawName = item.chunk.filePath.split('/').pop() || "";
+                    const cleanName = rawName.replace(/\.(pdf|md|txt)(\.source\.md)?$/i, "");
+                    
+                    // Add [Boosted] tag for debug clarity if it was a filename match
+                    const tag = item.similarity === 1.0 ? " (Exact Match)" : "";
+                    ctx += `\n### Source: ${cleanName}${tag}\n${item.chunk.content}\n---\n`;
                 }
                 return ctx;
             } catch (e) {

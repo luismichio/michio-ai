@@ -255,19 +255,33 @@ export default function Home() {
         return newArr;
     });
 
-    // 2. Read Context
-    const localHistory = await storage.getRecentLogs(6); 
-    const knowledgeContext = await storage.getKnowledgeContext(userMsg);
+    // 2. Read Context (STRICTLY Conditional)
+    let knowledgeContext = "";
+    if (meechi.mode === 'research') {
+        console.log(`[Page] Research Mode: Retrieving Context...`);
+        // This will acquire the GPU Lock for Embeddings
+        knowledgeContext = await storage.getKnowledgeContext(userMsg);
+        console.log(`[Page] RAG Retrieval: ${knowledgeContext.length} chars found`);
+    } else {
+        console.log(`[Page] ${meechi.mode} Mode: Skipping RAG`);
+    }
     
-    console.log(`[Page] RAG Retrieval for "${userMsg}":`, knowledgeContext ? `${knowledgeContext.length} chars found` : "EMPTY");
-
+    // Read local conversation history (Fast, no GPU)
+    const localHistory = await storage.getRecentLogs(6); 
+    
     let fullContext = `${knowledgeContext}\n\n--- Current Conversation History (Last 6h) ---\n${localHistory}`;
     if (attachedFiles.length > 0) {
         fullContext += `\n\n[SYSTEM: User has attached files. Look at 'temp/' folder if needed. Tools available: move_file, fetch_url.]`;
         setAttachedFiles([]);
     }
 
-    // 3. Call AI via Unified Meechi Hook
+    // 3. LOG MODE: Stop here.
+    if (meechi.mode === 'log') {
+        setIsChatting(false);
+        return; 
+    }
+
+    // 4. CHAT/RESEARCH MODE: Proceed to AI
     const historyForAI: AIChatMessage[] = messages.slice(-10).map(m => ({
         role: m.role === 'michio' ? 'assistant' : 'user',
         content: m.content
@@ -303,9 +317,6 @@ export default function Home() {
             // Append tool result to content
             currentContent += toolResult;
             
-            // Should we save to history log here?
-            // Ideally we save the FINAL state.
-            
              setMessages(prev => {
                 const newArr = [...prev];
                 const lastIdx = newArr.length - 1;
@@ -317,9 +328,11 @@ export default function Home() {
         }
     );
 
-    // 4. Final Save to History
-    const finalLogEntry = `### ${respTimestamp}\n**Meechi**: ${currentContent}\n\n`;
-    await storage.appendFile(`history/${currentDate}.md`, finalLogEntry);
+    // 5. Final Save to History
+    if (currentContent) {
+        const finalLogEntry = `### ${respTimestamp}\n**Meechi**: ${currentContent}\n\n`;
+        await storage.appendFile(`history/${currentDate}.md`, finalLogEntry);
+    }
     
     setIsChatting(false);
   }
@@ -569,6 +582,28 @@ export default function Home() {
                         <span className={styles.loadingDots}></span>
                     </div>
                 )}
+
+                {meechi.localAIStatus && meechi.localAIStatus.includes("Crashed") && (
+                    <div style={{ textAlign: 'center', margin: '1rem' }}>
+                        <div style={{ color: 'red', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                            ⚠ GPU Driver Crashed
+                        </div>
+                        <button 
+                            onClick={() => window.location.reload()}
+                            style={{
+                                background: '#ef4444', color: 'white', border: 'none',
+                                padding: '0.5rem 1rem', borderRadius: 6,
+                                cursor: 'pointer', fontSize: '0.9rem',
+                                boxShadow: '0 2px 4px rgba(239, 68, 68, 0.2)'
+                            }}
+                        >
+                            ⟳ Reload AI to Fix
+                        </button>
+                        <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', opacity: 0.8 }}>
+                            Tip: If crashes persist, try the <b>1B Model</b> in Settings.
+                        </div>
+                    </div>
+                )}
              </div>
       </div>
 
@@ -619,15 +654,52 @@ export default function Home() {
                     </div>
                 )}
 
-                <div style={{ display: 'flex', width: '100%', alignItems: 'flex-end', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', width: '100%', alignItems: 'flex-end', gap: '0.5rem', flexDirection: 'column' }}>
+                    
+                    {/* MODE SELECTOR */}
+                    <div style={{ 
+                        alignSelf: 'flex-start', 
+                        display: 'flex', 
+                        gap: '0.25rem', 
+                        padding: '2px', 
+                        background: 'var(--surface)', 
+                        borderRadius: 8, 
+                        marginBottom: 4,
+                        border: '1px solid var(--border)' 
+                    }}>
+                        {(['log', 'chat', 'research'] as const).map((m) => (
+                            <button
+                                key={m}
+                                type="button"
+                                onClick={() => meechi.setMode(m)}
+                                style={{
+                                    background: meechi.mode === m ? 'var(--accent)' : 'transparent',
+                                    color: meechi.mode === m ? 'var(--background)' : 'var(--secondary)',
+                                    border: 'none',
+                                    borderRadius: 6,
+                                    padding: '4px 8px',
+                                    fontSize: '0.75rem',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s ease',
+                                    display: 'flex', alignItems: 'center', gap: 4
+                                }}
+                            >
+                                {m === 'log' && '📝 Log'}
+                                {m === 'chat' && '💬 Chat'}
+                                {m === 'research' && '🔍 Research'}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div style={{ display: 'flex', width: '100%', alignItems: 'flex-end', gap: '0.5rem' }}>
                     <textarea 
                         ref={textareaRef}
                         value={chatInput}
                         onChange={(e) => setChatInput(e.target.value)}
                         placeholder={
-                            meechi.loadedModel?.includes('8B') || meechi.loadedModel?.includes('70B') 
-                            ? "Ask Meechi anything... (High-Power Mode)" 
-                            : "Meechi is in Low-Power mode to save your battery"
+                            meechi.mode === 'log' ? "Write to your Ship's Log..." :
+                            meechi.mode === 'research' ? "Ask a grounded question (Strict RAG)..." :
+                            "Ask Meechi anything... (Creative)"
                         }
                         onDragEnter={() => setIsDragOver(true)}
                         onDragLeave={() => setIsDragOver(false)}
@@ -670,6 +742,7 @@ export default function Home() {
                         }}
                         className={styles.chatInput}
                         rows={1}
+                        style={{ width: '100%' }}
                     />
                     <button type="submit" disabled={isChatting} className={styles.sendBtn}>
                         {isChatting ? (
@@ -678,6 +751,7 @@ export default function Home() {
                             <span>↑</span>
                         )}
                     </button>
+                    </div>
                 </div>
             </form>
          )}

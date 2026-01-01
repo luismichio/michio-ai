@@ -1,4 +1,7 @@
 import { SYSTEM_PROMPT } from "@/lib/ai/prompts";
+import { AIChatMessage, AITool, AICompletion, AIProvider } from "./types";
+import { GroqProvider } from "./providers/groq";
+import { GeminiProvider } from "./providers/gemini";
 
 export interface AIConfig {
     activeProviderId: string;
@@ -38,6 +41,16 @@ export class AIManager {
         let providerConfig = config.providers.find(p => p.id === primaryId);
         
         let provider = this.providers.get(primaryId);
+        
+        // CHECK API KEY for Cloud Providers
+        if (primaryId === 'openai' && !providerConfig?.apiKey && !process.env.OPENAI_API_KEY) {
+             console.warn("[Cloud] No OpenAI Key found.");
+             return {
+                 content: "I am unable to connect to the cloud because no API Key is configured. Please check your settings or restart the Local AI.",
+                 usage: { total_tokens: 0 }
+             };
+        }
+
         if (!provider) {
             console.warn(`Provider ${primaryId} not found. Falling back to Groq.`);
             provider = this.providers.get('groq')!;

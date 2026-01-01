@@ -140,6 +140,14 @@ Meechi is built with the latest web technologies to ensure speed, privacy, and r
 *   **Conversational Onboarding**: New users are greeted by Meechi and can set preferences naturally.
 *   **Settings UI**: Configuration page for Identity (Name, Tone).
 
+### v0.2.0 - "The Grounded Update" (2025-01-01)
+- **Deep Grounding**: Fixed RAG context injection for small models (1B/3B). Meechi now sees your files reliably.
+- **NotebookLM Style**: Research Mode now outputs structured Executive Summaries and Key Insights by default.
+- **Filename Boosting**: Search algorithm now prioritizes files specifically named in your query.
+- **Anti-Crash System**: Implemented `GPUResourceLock` to prevent browser crashes when running RAG and Chat simultaneously.
+- **Strict Local**: Complete removal of Cloud Fallback unless API keys are explicitly provided.
+- **Default Stability**: Switched default model to **Llama 3.2 1B** for maximum speed and stability on consumer hardware.
+
 ### v0.1.0 - The Genesis (Dec 2025)
 *   **Core Setup**: Initialized Next.js 16 app.
 *   **Guest Mode**: Local-only usage for privacy.

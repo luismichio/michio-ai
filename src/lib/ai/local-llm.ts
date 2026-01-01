@@ -1,9 +1,7 @@
-import { CreateMLCEngine, MLCEngine, MLCEngineInterface, CreateServiceWorkerMLCEngine } from "@mlc-ai/web-llm";
+import { CreateWebWorkerMLCEngine, MLCEngineInterface } from "@mlc-ai/web-llm";
 import { AIChatMessage, AITool } from "./types";
-
-export interface LocalLlmConfig {
-    modelId: string;
-}
+import { getModelConfig } from "./registry";
+import { gpuLock } from "./gpu-lock";
 
 export class WebLLMService {
     private engine: MLCEngineInterface | null = null;
@@ -11,9 +9,10 @@ export class WebLLMService {
     private currentModelId: string | null = null;
     private initPromise: Promise<void> | null = null;
     private progressListeners: ((text: string) => void)[] = [];
+    private worker: Worker | null = null;
 
     /**
-     * Connect to or Initialize the Engine via Service Worker
+     * Connect to or Initialize the Engine via Web Worker
      */
     async initialize(
         modelId: string, 
@@ -39,34 +38,37 @@ export class WebLLMService {
         // Create a new initialization promise
         this.initPromise = (async () => {
             try {
-                // switch to Standard Web Worker for reliability
-                // Service Workers are great for multi-tab, but brittle for "Active Controller" checks.
-                // Standard Worker is isolated and just works.
-                console.log("[Meechi] Initializing via Standard Web Worker (High Reliability)...");
+                console.log("[Meechi] Initializing via Dedicated Web Worker...");
 
                 // Ensure previous engine is unloaded to free GPU memory
                 if (this.engine) {
                     try {
                         console.log("[Meechi] Unloading previous engine...");
                         await this.engine.unload();
+                        // Terminate old worker to fully free memory
+                        if (this.worker) {
+                            this.worker.terminate();
+                            this.worker = null;
+                        }
                     } catch (e) {
                         console.warn("[Meechi] Failed to clean unload:", e);
                     }
                     this.engine = null;
                 }
                 
-                // CORRECT CONFIGURATION FOR CONTEXT WINDOW
-                // Lowering default context to 4096 to prevent OOM/Device Lost on mid-range GPUs
-                const SAFE_CONTEXT_WINDOW = 4096;
+                // Get Model Config
+                const modelConfig = getModelConfig(modelId);
+                const safeContext = config.context_window || modelConfig?.context_window || 4096;
+
+                // Create new Worker
+                this.worker = new Worker(new URL('./llm.worker.ts', import.meta.url), { type: 'module' });
                 
-                this.engine = await CreateMLCEngine(modelId, {
+                this.engine = await CreateWebWorkerMLCEngine(this.worker, modelId, {
                     initProgressCallback: (progress) => {
                         this.progressListeners.forEach(cb => cb(progress.text));
                     },
-                    // @ts-ignore
-                    context_window_size: SAFE_CONTEXT_WINDOW
                 }, {
-                    context_window_size: SAFE_CONTEXT_WINDOW,
+                    context_window_size: safeContext,
                 });
                 
                 this.currentModelId = modelId;
@@ -77,6 +79,10 @@ export class WebLLMService {
                 if (this.engine) {
                     try { await this.engine.unload(); } catch {} 
                     this.engine = null;
+                }
+                if (this.worker) {
+                    this.worker.terminate();
+                    this.worker = null;
                 }
                 this.currentModelId = null;
 
@@ -108,19 +114,18 @@ export class WebLLMService {
             throw new Error("Local Engine not initialized");
         }
 
-        // Convert messages to format expected by WebLLM if necessary
-        // WebLLM accepts { role: "user" | "assistant" | "system", content: string }
-        // Our AIChatMessage is compatible.
-        
+        // ACQUIRE GPU LOCK
+        // This stops RAG from trying to embed while we are generating tokens
+        await gpuLock.acquire('Chat');
+
         let fullResponse = "";
         
         try {
             const completion = await this.engine.chat.completions.create({
-                messages: messages as any, // Cast to avoid minor type mismatches if any
+                messages: messages as any,
                 stream: true,
-                temperature: options.temperature ?? 0.7, // Default to 0.7 if not specified
+                temperature: options.temperature ?? 0.7, 
                 top_p: options.top_p ?? 0.9,
-                // stream_options: { include_usage: true }, // Optional
             });
 
             for await (const chunk of completion) {
@@ -134,13 +139,21 @@ export class WebLLMService {
              console.error("WebLLM Chat Error:", e);
              // Detect GPU Context Loss or Device Loss
              const errMsg = e.message || "";
-             if (errMsg.includes("Context lost") || errMsg.includes("Device was lost") || errMsg.includes("Instance reference no longer exists")) {
+             if (errMsg.includes("Context lost") || errMsg.includes("Device was lost") || errMsg.includes("Instance reference no longer exists") || errMsg.includes("dropped in popErrorScope") || errMsg.includes("already been disposed")) {
                  console.warn("GPU Crash detected. Resetting WebLLM engine state...");
                  this.engine = null;
                  this.currentModelId = null;
-                 this.initPromise = null;
+                 if (this.worker) {
+                     this.worker.terminate();
+                     this.worker = null;
+                 }
+                 // Propagate a specific error for the UI to handle (e.g., suggest reload)
+                 throw new Error("GPU_CRASH");
              }
              throw e;
+        } finally {
+            // RELEASE GPU LOCK
+            gpuLock.release();
         }
 
         return fullResponse;
@@ -149,6 +162,11 @@ export class WebLLMService {
     isLoading() {
         return this.loading;
     }
+
+    getModelId() {
+        return this.currentModelId;
+    }
 }
 
 export const localLlmService = new WebLLMService();
+
