@@ -24,10 +24,11 @@ export function useMeechi() {
                 try {
                     const adapter = await navigator.gpu.requestAdapter();
                     if (adapter) {
-                        if (adapter.info) {
-                            info = adapter.info;
-                        } else if (typeof adapter.requestAdapterInfo === 'function') {
-                            info = await adapter.requestAdapterInfo();
+                        const a = adapter as any;
+                        if (a.info) {
+                            info = a.info;
+                        } else if (typeof a.requestAdapterInfo === 'function') {
+                            info = await a.requestAdapterInfo();
                         }
                     }
                 } catch (e) {
@@ -66,7 +67,8 @@ export function useMeechi() {
 
                     setLocalAIStatus(`Sage (Local - Loading ${lowPower ? '1B' : '8B'}...)`);
                     
-                    const contextWindow = config.context_window || 8192; 
+                    // Use any cast to access context_window if not in type definition yet
+                    const contextWindow = (config as any).context_window || 8192; 
                     
                     console.log("[Meechi] Calling Initialize Service...", { modelId, contextWindow });
                     
