@@ -15,7 +15,7 @@ import { Plugin } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { 
     Bold, Italic, Strikethrough, Code, Link as LinkIcon, 
-    Highlighter, MessageSquareText, ChevronDown, FolderOpen, Edit3, Trash2, Save, X,
+    Highlighter, MessageSquare, MessageSquareText, ChevronDown, FolderOpen, Edit3, Trash2, Save, X,
     Type, Heading1, Heading2, Heading3, List, ListOrdered, Quote, Minus
 } from 'lucide-react'; // Notion-style Icons
 
@@ -41,39 +41,8 @@ interface Comment {
     timestamp: number;
 }
 
-const CommentIconExtension = Extension.create({
-    name: 'commentIcon',
-    addProseMirrorPlugins() {
-        return [
-            new Plugin({
-                props: {
-                    decorations(state) {
-                        const { doc } = state;
-                        const decorations: Decoration[] = [];
-                        doc.descendants((node, pos) => {
-                            if (!node.isText) return;
-                            const hasComment = node.marks.find(m => m.type.name === 'highlight' && m.attrs.commentId);
-                            if (hasComment) {
-                                // Add icon at the end of the text node? Or floating?
-                                // User wants "next to the paragraph".
-                                // Adding a widget at the end of the text node is safest.
-                                const widget = Decoration.widget(pos + node.nodeSize, () => {
-                                    const span = document.createElement('span');
-                                    span.className = 'comment-icon-widget';
-                                    span.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M13 8H7"/><path d="M17 12H7"/></svg>';
-                                    span.title = 'Has comment';
-                                    return span;
-                                }, { side: 1 });
-                                decorations.push(widget);
-                            }
-                        });
-                        return DecorationSet.create(doc, decorations);
-                    }
-                }
-            })
-        ]
-    }
-});
+// CommentIconExtension removed in favor of coordinate-based sidebar icons
+
 
 export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }: SourceEditorProps) {
     // State
@@ -84,6 +53,20 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
     const [tagInput, setTagInput] = useState("");
     const [editedContent, setEditedContent] = useState(file.content);
     const [comments, setComments] = useState<Comment[]>(file.metadata?.comments || []);
+    const commentsRef = useRef<Comment[]>(comments);
+    
+    const [sidebarIcons, setSidebarIcons] = useState<{top: number, left: number, count: number, firstCommentId: string}[]>([]);
+    
+    // Link Modal State
+    const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
+    const [linkUrl, setLinkUrl] = useState("");
+    const [linkText, setLinkText] = useState("");
+    const [linkRange, setLinkRange] = useState<{ from: number, to: number } | null>(null);
+    
+    // Keep ref synced for closures (like updatePopups)
+    useEffect(() => {
+        commentsRef.current = comments;
+    }, [comments]);
     
     // Sync comments with props (critical for persistence across reloads/saves)
     useEffect(() => {
@@ -97,8 +80,10 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
 
     // Ref to access editor inside handlers defined before useEditor (Circular Dependency Fix)
     const editorRef = useRef<any>(null);
-
+    const editorContainerRef = useRef<HTMLDivElement>(null);
+    const popupRef = useRef<HTMLDivElement>(null);
     // --- SLASH COMMAND STATE & HANDLERS ---
+
     const [slashMenuPos, setSlashMenuPos] = useState<{top: number, left: number} | null>(null);
     const [slashQuery, setSlashQuery] = useState("");
     const [slashIndex, setSlashIndex] = useState(0);
@@ -202,9 +187,10 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
             }),
             Markdown.configure({
                 html: true,
-                breaks: true, // Use <br> for hard breaks
+                breaks: true,
+                transformPastedText: false,
+                transformCopiedText: false,
             }),
-            CommentIconExtension,
             Highlight.configure({ multicolor: true }).extend({
                 addAttributes() {
                     return {
@@ -220,7 +206,7 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                     }
                 }
             }),
-            LinkExtension.configure({ openOnClick: false }),
+            // LinkExtension.configure({ openOnClick: false }), // Commented out to check for duplicates
             Placeholder.configure({ placeholder: "Start typing..." }),
             TextStyle,
             Color
@@ -269,20 +255,103 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
         editor?.setEditable(isEditing);
     }, [isEditing, editor]);
 
+    // Restore highlights from comment metadata when editor loads
+    useEffect(() => {
+        if (!editor || comments.length === 0) return;
+        
+        console.log('[SourceEditor] Checking highlights for', comments.length, 'comments');
+        
+        // Collect all existing highlights first
+        const existingHighlights = new Set<string>();
+        editor.state.doc.descendants((node) => {
+            if (node.isText) {
+                node.marks.forEach(m => {
+                    if (m.type.name === 'highlight' && m.attrs.commentId) {
+                        existingHighlights.add(m.attrs.commentId);
+                    }
+                });
+            }
+        });
+        
+        // Only restore missing highlights
+        const missingComments = comments.filter((c: Comment) => !existingHighlights.has(c.id));
+        
+        if (missingComments.length === 0) {
+            console.log('[SourceEditor] All highlights already present');
+            return;
+        }
+        
+        console.log('[SourceEditor] Restoring', missingComments.length, 'missing highlights');
+        
+        // Wait longer for editor to be fully ready and stable
+        setTimeout(() => {
+            if (!editor || editor.isDestroyed) return;
+            
+            const { doc } = editor.state;
+            const tr = editor.state.tr;
+            let modified = false;
+            
+            missingComments.forEach((comment: Comment) => {
+                // Search for the quoted text
+                const quote = comment.quote.trim();
+                if (!quote) {
+                    console.warn('[SourceEditor] Skipping comment with empty quote:', comment.id.substring(0, 8));
+                    return;
+                }
+                
+                let found = false;
+                doc.descendants((node, pos) => {
+                    if (found || !node.isText) return;
+                    
+                    const text = node.text || '';
+                    const index = text.indexOf(quote);
+                    
+                    if (index !== -1) {
+                        // Found the text, add highlight
+                        const from = pos + index;
+                        const to = pos + index + quote.length;
+                        
+                        tr.addMark(from, to, editor.schema.marks.highlight.create({ commentId: comment.id }));
+                        modified = true;
+                        found = true;
+                        console.log('[SourceEditor] ✓ Restored highlight for comment:', comment.id.substring(0, 8), 'at pos', from, '-', to);
+                    }
+                });
+                
+                if (!found) {
+                    console.warn('[SourceEditor] ✗ Could not find text for comment:', comment.id.substring(0, 8), 'quote:', quote.substring(0, 50));
+                }
+            });
+            
+            if (modified) {
+                editor.view.dispatch(tr);
+                console.log('[SourceEditor] ✓✓✓ Successfully restored', missingComments.length, 'highlights');
+            }
+        }, 300); // Increased delay to ensure editor is stable
+    }, [editor, comments, file.path]); // Added file.path dependency
+
     // Popup States (Manual positioning to avoid BubbleMenu Read-Only limitations)
     // Popup States (Manual positioning to avoid BubbleMenu Read-Only limitations)
     const [selectionMenuPos, setSelectionMenuPos] = useState<{top: number, left: number} | null>(null);
     const [editMenuPos, setEditMenuPos] = useState<{top: number, left: number} | null>(null);
     const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
-    const [commentPopupPos, setCommentPopupPos] = useState<{top: number, left: number} | null>(null);
+    const [commentPopupPos, setCommentPopupPos] = useState<{top: number, left: number, width?: number} | null>(null);
     
     // Editing Comment State
     const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
     const [editingCommentText, setEditingCommentText] = useState("");
+    const [isNewComment, setIsNewComment] = useState(false); // Track if currently editing a new comment
     
     // Ref for updatePopups to access latest state without re-binding
     const editingCommentIdRef = useRef<string | null>(null);
     useEffect(() => { editingCommentIdRef.current = editingCommentId; }, [editingCommentId]);
+    
+    const activeCommentIdRef = useRef<string | null>(null);
+    useEffect(() => { activeCommentIdRef.current = activeCommentId; }, [activeCommentId]);
+
+    // Guards for popup behavior
+    const dismissedCommentIdRef = useRef<string | null>(null);
+    const lastInteractionRef = useRef<'mouse' | 'keyboard' | null>(null);
     
     // Bubble Menu UI State
     const [activeDropdown, setActiveDropdown] = useState<'turnInto' | 'color' | null>(null);
@@ -293,7 +362,7 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
     useEffect(() => {
         if (!editor) return;
 
-        const updatePopups = () => {
+        const updatePopups = (activeIds?: Set<string>) => {
             if (editor.isDestroyed) return;
 
             // Safe interaction with view
@@ -301,19 +370,43 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
             const view = editor.view;
 
             // 1. Selection Menus (Read & Edit)
-            if (!selection.empty && !editor.isActive('highlight')) {
-                const { to } = selection;
-                const coords = view.coordsAtPos(to);
+            const showMenu = !selection.empty || (editor.isActive('link') && !editor.isActive('highlight'));
+            
+            if (showMenu) {
+                const { from, to } = selection;
+                const fromCoords = view.coordsAtPos(from);
+                const toCoords = selection.empty ? fromCoords : view.coordsAtPos(to);
                 
-                // Adjust position to be above the selection
-                const pos = { top: coords.top - 50, left: coords.left };
+                // Estimate menu dimensions
+                const menuWidth = isEditing ? 350 : 160; 
+                const menuHeight = 44;
+                
+                // Center relative to selection (or cursor if empty)
+                let left = (fromCoords.left + toCoords.left) / 2 - (menuWidth / 2);
+                let top = fromCoords.top - menuHeight - 12;
+
+                // 1a. Top Boundary - if no space above, show BELOW the selection
+                if (top < 10) {
+                    top = toCoords.bottom + 12;
+                }
+
+                // 1b. Horizontal Boundaries (Viewport)
+                const viewportWidth = window.innerWidth;
+                if (left + menuWidth > viewportWidth - 15) {
+                    left = viewportWidth - menuWidth - 15;
+                }
+                if (left < 15) {
+                    left = 15;
+                }
+
+                const pos = { top, left };
 
                 if (isEditing) {
                     // Show Edit Toolbar
                     setEditMenuPos(pos);
                     setSelectionMenuPos(null);
                 } else {
-                    // Show Read Menu ("Add Comment")
+                    // Show Read Menu ("Add Comment" + "Link")
                     setSelectionMenuPos(pos);
                     setEditMenuPos(null);
                 }
@@ -321,12 +414,8 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                 setSelectionMenuPos(null);
                 // Do NOT hide Edit Toolbar automatically if we are interacting with it?
                 // Tiptap's BubbleMenu logic checks for focus.
-                // For now, if selection is empty, we must hide it.
-                // But if we click the menu, selection might stay?
-                // Actually, if selection remains range, we show it. 
-                if (selection.empty) {
-                    setEditMenuPos(null);
-                }
+                // For now, if selection is empty and NOT a link, we must hide it.
+                setEditMenuPos(null);
             }
 
             // --- SLASH COMMAND DETECTION ---
@@ -342,7 +431,28 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                     const query = match[1];
                     setSlashQuery(query);
                     const coords = view.coordsAtPos(from);
-                    setSlashMenuPos({ top: coords.bottom + 5, left: coords.left });
+                    
+                    // Boundary Checks for Slash Menu
+                    const menuWidth = 260;
+                    const menuHeight = Math.min(filteredSlashCommands.length * 40 + 40, 300);
+                    const viewportWidth = window.innerWidth;
+                    const viewportHeight = window.innerHeight;
+
+                    let top = coords.bottom + 5;
+                    let left = coords.left;
+
+                    // Vertical Flip if no space below
+                    if (top + menuHeight > viewportHeight - 20) {
+                        top = coords.top - menuHeight - 5;
+                    }
+
+                    // Horizontal constraint
+                    if (left + menuWidth > viewportWidth - 20) {
+                        left = viewportWidth - menuWidth - 20;
+                    }
+                    if (left < 20) left = 20;
+
+                    setSlashMenuPos({ top, left });
                 } else {
                     setSlashMenuPos(null);
                 }
@@ -359,51 +469,402 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
             // b) We are currently EDITING a comment (regardless of selection)
             if (editingCommentIdRef.current) {
                 // Keep it open!
-            } else if (selection.empty && editor.isActive('highlight')) {
+            } else if (isEditing && lastInteractionRef.current !== 'mouse') {
+                // In Edit Mode, we ONLY open if it was a manual click/intentional action
+                // Keyboard interactions (arrows/typing) close the viewer
+                if (activeCommentId) {
+                    setActiveCommentId(null);
+                    setCommentPopupPos(null);
+                }
+            } else if ((selection.empty || lastInteractionRef.current === 'mouse') && editor.isActive('highlight')) {
                 const attrs = editor.getAttributes('highlight');
-                if (attrs.commentId) {
+                // Verify this comment ID is actually "alive" in the doc
+                const isAlive = activeIds ? activeIds.has(attrs.commentId) : true;
+                
+                if (attrs.commentId && isAlive) {
+
                     // Only update if ID changed to avoid jitter, or if we need to show it initially
                     if (activeCommentId !== attrs.commentId) {
-                        setActiveCommentId(attrs.commentId);
-                        
-                        // Find the range of this mark
+                    // Remove active-comment class from all highlights
+                    const editorDom = view.dom;
+                    editorDom.querySelectorAll('mark[data-comment-id].active-comment').forEach(el => {
+                        el.classList.remove('active-comment');
+                    });
+                    
+                    // CHECK DISMISSAL GUARD
+                    if (dismissedCommentIdRef.current === attrs.commentId) {
+                        return; // Stay dismissed
+                    }
+
+                    setActiveCommentId(attrs.commentId);
+                    
+                    // Clear dismissal guard if we actually changed to a NEW comment
+                    if (dismissedCommentIdRef.current) {
+                        dismissedCommentIdRef.current = null;
+                    }
+
+                    // Find the range of this mark
                         const { from } = editor.state.selection;
                         const resolvedPos = editor.state.doc.resolve(from);
                         const markRange = getMarkRange(resolvedPos, editor.schema.marks.highlight);
                         
                         if (markRange) {
-                            const coords = view.coordsAtPos(markRange.from); 
-                            setCommentPopupPos({ top: coords.bottom, left: coords.left });
+                            const startCoords = view.coordsAtPos(markRange.from);
+                            const endCoords = view.coordsAtPos(markRange.to);
+                            
+                            // Add active-comment class to this highlight
+                            setTimeout(() => {
+                                const highlightElement = editorDom.querySelector(`mark[data-comment-id="${attrs.commentId}"]`);
+                                if (highlightElement) {
+                                    highlightElement.classList.add('active-comment');
+                                }
+                            }, 10);
+                            
+                            // Get editor bounds
+                            const editorDom = view.dom;
+                            const editorRect = editorDom.getBoundingClientRect();
+                            
+                            // Find the comment to check its text length - USE REF to avoid stale closure
+                            const comment = commentsRef.current.find(c => c.id === attrs.commentId);
+                            const commentTextLength = comment?.text?.length || 0;
+                            
+                            //Width logic:
+                            // - Very short comments (< 50 chars): min 260px, scaled
+                            // - Long comments (>= 50 chars): use full editor width
+                            let popupWidth;
+                            if (commentTextLength >= 50) {
+                                // Long comment: use full editor width minus padding
+                                popupWidth = editorRect.width - 80; // More padding for aesthetics
+                            } else {
+                                // Short comment: min 260px, max 500px
+                                popupWidth = Math.min(Math.max(260, commentTextLength * 10), 500);
+                            }
+                            
+                            // Get highlight boundaries
+                            const highlightTop = startCoords.top;
+                            const highlightBottom = endCoords.bottom;
+                            const highlightHeight = highlightBottom - highlightTop;
+                            
+                            // Calculate more accurate popup height based on comment length and width
+                            let estimatedPopupHeight;
+                            if (commentTextLength === 0) {
+                                estimatedPopupHeight = 150; // Empty comment, just input box
+                            } else {
+                                // Calculate approximate lines needed
+                                // Assuming ~70 chars per line at typical width, ~20px per line
+                                const charsPerLine = commentTextLength >= 50 ? 90 : 40; // Wider for full-width
+                                const lineHeight = 20;
+                                const numLines = Math.ceil(commentTextLength / charsPerLine);
+                                const textHeight = numLines * lineHeight;
+                                
+                                // Add padding, header, buttons, borders (150px overhead - increased from 80px)
+                                estimatedPopupHeight = textHeight + 150;
+                                
+                                // Cap at 400px max (will be scrollable beyond this)
+                                estimatedPopupHeight = Math.min(estimatedPopupHeight, 400);
+                            }
+                            
+                            console.log('[SourceEditor] Estimated popup height:', estimatedPopupHeight, 'px for', commentTextLength, 'chars');
+                            
+                            // Minimum spacing to ensure highlight stays visible (increased to 30px)
+                            const minSpacing = 30;
+                            
+                            // Get viewport constraints
+                            const viewportHeight = window.innerHeight;
+                            const viewportTop = 0;
+                            
+                            // Calculate available space above and below the highlight
+                            const spaceAbove = highlightTop - viewportTop;
+                            const spaceBelow = viewportHeight - highlightBottom;
+                            
+                            console.log('[SourceEditor] Space above:', spaceAbove, 'Space below:', spaceBelow, 'Need:', estimatedPopupHeight);
+                            
+                            let top;
+                            let positionedAbove = false;
+                            
+                            // Decision logic: prefer below, but switch to above if necessary
+                            if (spaceBelow >= estimatedPopupHeight + minSpacing) {
+                                // Enough room below - position below the highlight
+                                top = highlightBottom + minSpacing;
+                                console.log('[SourceEditor] Positioning below highlight');
+                                console.log('[SourceEditor] → highlightBottom:', highlightBottom, '+ minSpacing:', minSpacing, '= top:', top);
+                            } else if (spaceAbove >= estimatedPopupHeight + minSpacing) {
+                                // Not enough below, but enough above - position above
+                                top = highlightTop - estimatedPopupHeight - minSpacing;
+                                positionedAbove = true;
+                                console.log('[SourceEditor] Positioning above highlight (not enough space below)');
+                                console.log('[SourceEditor] → highlightTop:', highlightTop, '- height:', estimatedPopupHeight, '- spacing:', minSpacing, '= top:', top);
+                            } else {
+                                // Not enough space in either direction
+                                // Position above and let it extend to top of viewport if needed
+                                top = Math.max(10, highlightTop - estimatedPopupHeight - minSpacing);
+                                positionedAbove = true;
+                                console.warn('[SourceEditor] Limited space - positioning above with possible overflow');
+                                console.log('[SourceEditor] → Calculated top:', top);
+                            }
+                            
+                            // Final safety check: ensure popup is within viewport
+                            if (top < 10) {
+                                top = 10;
+                            }
+                            if (top + estimatedPopupHeight > viewportHeight - 10) {
+                                // If positioned below would overflow, must position above
+                                if (!positionedAbove) {
+                                    top = highlightTop - estimatedPopupHeight - minSpacing;
+                                    console.log('[SourceEditor] Adjusted to above due to viewport overflow');
+                                }
+                            }
+                            
+                            // Horizontal positioning
+                            let left = startCoords.left;
+                            
+                            // Ensure popup doesn't overflow right edge
+                            if (left + popupWidth > editorRect.right) {
+                                left = editorRect.right - popupWidth - 20;
+                            }
+                            
+                            // Ensure popup doesn't overflow left edge
+                            if (left < editorRect.left) {
+                                left = editorRect.left + 20;
+                            }
+                            
+                            setCommentPopupPos({ top, left, width: popupWidth });
                         } else {
                             // Fallback to cursor if range fails (shouldn't happen if isActive is true)
                             const coords = view.coordsAtPos(from);
-                            setCommentPopupPos({ top: coords.bottom, left: coords.left });
+                            setCommentPopupPos({ top: coords.bottom, left: coords.left, width: 260 });
                         }
                     }
                 }
             } else {
-                // HIDE condition:
-                // Only hide if we aren't currently editing this comment
+                // setSelectionMenuPos(null); // REMOVED: Conflicting reset
+                // IF NOT EDITING A COMMENT, also hide view popups when clicking non-highlighted area
                 if (!editingCommentIdRef.current) {
-                     setActiveCommentId(null);
-                     setCommentPopupPos(null);
+                    if (activeCommentId) {
+                        setActiveCommentId(null);
+                        setCommentPopupPos(null);
+                    }
+                    // CLEANUP CLASSES - ensure no ghost highlights
+                    const editorDom = view.dom;
+                    editorDom.querySelectorAll('mark[data-comment-id].active-comment').forEach(el => {
+                        el.classList.remove('active-comment');
+                    });
+                }
+                // Clear dismissal guard if we are no longer on a highlight
+                if (dismissedCommentIdRef.current) {
+                    dismissedCommentIdRef.current = null;
                 }
             }
         };
 
-        editor.on('selectionUpdate', updatePopups);
-        editor.on('transaction', updatePopups);
+        const updateSidebarIcons = () => {
+            if (!editor || editor.isDestroyed) return new Set<string>();
+            const view = editor.view;
+            const editorDom = view.dom;
+            const editorRect = editorDom.getBoundingClientRect();
+            
+            const targetLeft = editorRect.left - 30; // Offset to the left of editor
+            
+            // 1. Group highlights by line
+            const lineGroups = new Map<number, { top: number, ids: string[] }>();
+            const activeIds = new Set<string>();
+
+            editor.state.doc.descendants((node, pos) => {
+                if (!node.isText) return;
+                const mark = node.marks.find(m => m.type.name === 'highlight' && m.attrs.commentId);
+                if (mark) {
+                    const commentId = mark.attrs.commentId;
+                    activeIds.add(commentId);
+                    
+                    const startCoords = view.coordsAtPos(pos);
+                    // Use relative top (offset from editor top)
+                    const top = startCoords.top - editorRect.top; 
+                    
+                    // Snap to grid for grouping (using relative top)
+                    const gridTop = Math.floor(top / 20) * 20;
+                    
+                    if (!lineGroups.has(gridTop)) {
+                        lineGroups.set(gridTop, { top, ids: [] });
+                    }
+                    const group = lineGroups.get(gridTop)!;
+                    if (!group.ids.includes(commentId)) {
+                        group.ids.push(commentId);
+                    }
+                }
+            });
+
+            // 2. Convert to sidebar list
+            const sidebarList = Array.from(lineGroups.values()).map(line => ({
+                top: line.top,
+                left: 0, // Using absolute positioning relative to the sidebar layer (which is at -40px)
+                count: line.ids.length,
+                firstCommentId: line.ids[0]
+            }));
+
+            setSidebarIcons(sidebarList);
+            return activeIds;
+        };
+
+        const handleUpdate = () => {
+            const activeIds = updateSidebarIcons();
+            updatePopups(activeIds);
+        };
+
+        // Dismissal logic for clicks outside
+        const handleGlobalMousedown = (e: MouseEvent) => {
+            const currentActive = activeCommentIdRef.current;
+            const currentEditing = editingCommentIdRef.current;
+            
+            const target = e.target as HTMLElement;
+            const isOutsideEditor = editorContainerRef.current && !editorContainerRef.current.contains(target);
+            const isOutsidePopup = popupRef.current && !popupRef.current.contains(target);
+            const clickedHighlight = target.closest('mark[data-comment-id]');
+            const clickedCommentId = clickedHighlight?.getAttribute('data-comment-id');
+
+            // 1. If clicking INSIDE the popup, do nothing (allow interaction with buttons/scroll)
+            if (!isOutsidePopup) return;
+
+            // If we click INSIDE the editor (even on plain text), clear the dismissal guard
+            if (!isOutsideEditor) {
+                dismissedCommentIdRef.current = null;
+                lastInteractionRef.current = 'mouse';
+            }
+
+            // 2. If clicking on a highlight, handle toggle/intentional open
+            if (clickedCommentId) {
+                lastInteractionRef.current = 'mouse';
+                
+                if (clickedCommentId === currentActive) {
+                    // Clicked same highlight -> Toggle (Close & Deselect)
+                    dismissedCommentIdRef.current = clickedCommentId;
+                    setActiveCommentId(null);
+                    setCommentPopupPos(null);
+                    if (editor && !editor.isDestroyed) {
+                        // Collapse selection to effectively "deselect"
+                        editor.commands.setTextSelection(editor.state.selection.to);
+                    }
+                    return;
+                }
+                // Different highlight -> will be handled by auto-open logic
+                return;
+            }
+
+            // 3. Clicked ANYWHERE else (plain text, margins, background) -> Dismiss & Deselect
+            if (currentActive || currentEditing) {
+                if (currentActive) {
+                    dismissedCommentIdRef.current = currentActive;
+                }
+                
+                // Deselect / Collapse selection to end
+                if (editor && !editor.isDestroyed) {
+                    const { selection } = editor.state;
+                    editor.commands.setTextSelection(selection.to);
+                }
+
+                setActiveCommentId(null);
+                setCommentPopupPos(null);
+                setEditingCommentId(null);
+            }
+        };
+
+        // Dismissal logic for keyboard - clear guard and DISMISS on any key
+        const handleGlobalKeydown = (e: KeyboardEvent) => {
+            dismissedCommentIdRef.current = null;
+            lastInteractionRef.current = 'keyboard';
+            
+            const currentActive = activeCommentIdRef.current;
+            const currentEditing = editingCommentIdRef.current;
+            
+            // Ignore if we are actually editing a comment
+            if (currentEditing) return;
+
+            // Typing or moving caret closes the viewer
+            if (currentActive) {
+                setActiveCommentId(null);
+                setCommentPopupPos(null);
+            }
+        };
+
+        // Dismissal logic for scroll
+        const handleGlobalScroll = (e: Event) => {
+            const currentActive = activeCommentIdRef.current;
+            const currentEditing = editingCommentIdRef.current;
+            if (!currentActive && !currentEditing) return;
+            
+            // Check if scroll is happening INSIDE the comment
+            // Use (e.target as any) to bypass Prosemirror Node collision
+            const isInsideComment = popupRef.current && popupRef.current.contains(e.target as any);
+            
+            if (!isInsideComment) {
+                if (currentActive) {
+                    dismissedCommentIdRef.current = currentActive;
+                }
+                
+                // Deselect / Collapse selection to end
+                if (editor && !editor.isDestroyed) {
+                    const { selection } = editor.state;
+                    editor.commands.setTextSelection(selection.to);
+                }
+
+                setActiveCommentId(null);
+                setCommentPopupPos(null);
+                setEditingCommentId(null);
+            }
+        };
+
+        editor.on('selectionUpdate', handleUpdate);
+        editor.on('transaction', handleUpdate);
+        
+        // Initial run
+        setTimeout(handleUpdate, 100);
+
+        // Also track window resize/scroll for sidebar icons
+        window.addEventListener('scroll', updateSidebarIcons, true);
+        window.addEventListener('resize', updateSidebarIcons);
+        
+        // New dismissal listeners
+        document.addEventListener('mousedown', handleGlobalMousedown);
+        document.addEventListener('keydown', handleGlobalKeydown);
+        // Use capture phase for scroll to catch it before it bubbles or if it doesn't bubble
+        document.addEventListener('scroll', handleGlobalScroll, true);
         
         return () => {
-            editor.off('selectionUpdate', updatePopups);
-            editor.off('transaction', updatePopups);
+            editor.off('selectionUpdate', handleUpdate);
+            editor.off('transaction', handleUpdate);
+            window.removeEventListener('scroll', updateSidebarIcons, true);
+            window.removeEventListener('resize', updateSidebarIcons);
+            document.removeEventListener('mousedown', handleGlobalMousedown);
+            document.removeEventListener('keydown', handleGlobalKeydown);
+            document.removeEventListener('scroll', handleGlobalScroll, true);
         };
     }, [editor, isEditing]);
 
     // Handlers
     const handleSave = async () => {
-        // Construct basic metadata
-        const newMeta = { ...file.metadata, isSource, comments: file.metadata?.comments || [] };
+        // Mark as Edited in Metadata
+        // Use local comments state as source of truth
+        // PRUNE COMMENTS: removed orphaned ones that no longer have highlights in the doc
+        if (!editor) return;
+        const liveIds = new Set<string>();
+        editor.state.doc.descendants((node) => {
+            if (node.isText) { // Only check text nodes for marks
+                node.marks.forEach(mark => {
+                    if (mark.type.name === 'highlight' && mark.attrs.commentId) {
+                        liveIds.add(mark.attrs.commentId);
+                    }
+                });
+            }
+        });
+
+        const prunedComments = comments.filter(c => liveIds.has(c.id));
+        setComments(prunedComments);
+
+        const newMeta = { 
+            ...file.metadata, 
+            isSource, 
+            comments: prunedComments, 
+            edited: true 
+        };
         
         await onSave(editedContent, tags, newMeta);
         setIsEditing(false);
@@ -445,12 +906,20 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
         const currentComments = file.metadata?.comments || [];
         const newComments = [...currentComments, newComment];
         
+        console.log('[SourceEditor] Adding comment:', newComment);
+        console.log('[SourceEditor] Current comments:', currentComments.length);
+        console.log('[SourceEditor] New comments:', newComments.length);
+        
         setComments(newComments);
         
         // Auto-save metadata
         if (onUpdateMetadata) {
              const newMeta = { ...file.metadata, isSource, comments: newComments };
+             console.log('[SourceEditor] Calling onUpdateMetadata with comments:', newComments.length);
              await onUpdateMetadata(tags, newMeta);
+             console.log('[SourceEditor] onUpdateMetadata completed');
+        } else {
+             console.warn('[SourceEditor] onUpdateMetadata is not provided!');
         }
 
         // --- NEW: Immediately open popup in Edit Mode ---
@@ -458,16 +927,20 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
         setActiveCommentId(commentId);
         setEditingCommentId(commentId);
         setEditingCommentText(""); // Fresh start
+        setIsNewComment(true); // Mark as new comment
 
         // 2. Calculate Position IMMEDIATELY (Don't wait for effect)
-        // We use the start of the selection (or the mark range)
         const view = editor.view;
-        // Selection is still active (range). We want the popup near the start or end?
-        // Usually near the end of selection or the side.
-        // Let's use 'to' (end of selection) or 'from'.
-        // Meechi style: coordsAtPos(from)
         const coords = view.coordsAtPos(from);
-        setCommentPopupPos({ top: coords.bottom, left: coords.left });
+        
+        // Get editor bounds for initial width calculation
+        const editorDom = view.dom;
+        const editorRect = editorDom.getBoundingClientRect();
+        
+        // For new comments, start with min width (will expand if needed)
+        const initialWidth = 260;
+        
+        setCommentPopupPos({ top: coords.bottom, left: coords.left, width: initialWidth });
         
     };
 
@@ -508,6 +981,7 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
     const handleStartEditComment = (comment: Comment) => {
         setEditingCommentId(comment.id);
         setEditingCommentText(comment.text);
+        setIsNewComment(false); // Editing existing comment
     };
 
     const handleSaveCommentEdit = async () => {
@@ -518,13 +992,103 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
             c.id === editingCommentId ? { ...c, text: editingCommentText } : c
         );
 
+        console.log('[SourceEditor] Saving comment edit:', editingCommentId);
+        console.log('[SourceEditor] New text:', editingCommentText);
+        console.log('[SourceEditor] Updated comments count:', newComments.length);
+
         setComments(newComments);
         if (onUpdateMetadata) {
              const newMeta = { ...file.metadata, isSource, comments: newComments };
+             console.log('[SourceEditor] Calling onUpdateMetadata for comment edit');
              await onUpdateMetadata(tags, newMeta);
+             console.log('[SourceEditor] Comment edit saved');
         }
         
+        // Force position recalculation to update width AND position
+        const savedCommentId = editingCommentId;
         setEditingCommentId(null);
+        setIsNewComment(false);
+        
+        // Manually trigger updatePopups to recalculate position
+        // This is more reliable than waiting for selection/transaction events
+        if (editor && !editor.isDestroyed) {
+            // First set the active comment
+            setActiveCommentId(savedCommentId);
+            
+            // Then trigger a position update after a short delay
+            setTimeout(() => {
+                // Find the highlight for this comment
+                const view = editor.view;
+                let found = false;
+                
+                editor.state.doc.descendants((node, pos) => {
+                    if (found || !node.isText) return;
+                    const mark = node.marks.find(m => m.type.name === 'highlight' && m.attrs.commentId === savedCommentId);
+                    if (mark) {
+                        const from = pos;
+                        const to = pos + node.nodeSize;
+                        const startCoords = view.coordsAtPos(from);
+                        const endCoords = view.coordsAtPos(to);
+                        
+                        // Get editor bounds
+                        const editorDom = view.dom;
+                        const editorRect = editorDom.getBoundingClientRect();
+                        
+                        // Find the saved comment to check its new length
+                        const comment = newComments.find((c: Comment) => c.id === savedCommentId);
+                        const commentTextLength = comment?.text?.length || 0;
+                        
+                        // Recalculate width
+                        let popupWidth;
+                        if (commentTextLength >= 50) {
+                            popupWidth = editorRect.width - 80;
+                        } else {
+                            popupWidth = Math.min(Math.max(260, commentTextLength * 10), 500);
+                        }
+                        
+                        // Recalculate position (reuse same logic)
+                        const highlightTop = startCoords.top;
+                        const highlightBottom = endCoords.bottom;
+                        
+                        let estimatedPopupHeight;
+                        if (commentTextLength === 0) {
+                            estimatedPopupHeight = 150;
+                        } else {
+                            const charsPerLine = commentTextLength >= 50 ? 90 : 40;
+                            const lineHeight = 20;
+                            const numLines = Math.ceil(commentTextLength / charsPerLine);
+                            const textHeight = numLines * lineHeight;
+                            estimatedPopupHeight = Math.min(textHeight + 150, 400);
+                        }
+                        
+                        const minSpacing = 30;
+                        const viewportHeight = window.innerHeight;
+                        const spaceAbove = highlightTop;
+                        const spaceBelow = viewportHeight - highlightBottom;
+                        
+                        let top;
+                        if (spaceBelow >= estimatedPopupHeight + minSpacing) {
+                            top = highlightBottom + minSpacing;
+                        } else if (spaceAbove >= estimatedPopupHeight + minSpacing) {
+                            top = highlightTop - estimatedPopupHeight - minSpacing;
+                        } else {
+                            top = Math.max(10, highlightTop - estimatedPopupHeight - minSpacing);
+                        }
+                        
+                        let left = startCoords.left;
+                        if (left + popupWidth > editorRect.right) {
+                            left = editorRect.right - popupWidth - 20;
+                        }
+                        if (left < editorRect.left) {
+                            left = editorRect.left + 20;
+                        }
+                        
+                        setCommentPopupPos({ top, left, width: popupWidth });
+                        found = true;
+                    }
+                });
+            }, 100);
+        }
     };
 
     const handleAddTag = async (e: React.KeyboardEvent) => {
@@ -538,6 +1102,70 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
             }
             setTagInput("");
         }
+    };
+
+    const handleOpenLinkModal = () => {
+        if (!editor) return;
+
+        const { from, to } = editor.state.selection;
+        const isCurrentlyLink = editor.isActive('link');
+        
+        let url = "";
+        let text = editor.state.doc.textBetween(from, to, ' ');
+
+        if (isCurrentlyLink) {
+            const attrs = editor.getAttributes('link');
+            url = attrs.href || "";
+            // Expand to get the full link text if needed
+            const range = getMarkRange(editor.state.doc.resolve(from), editor.schema.marks.link);
+            if (range) {
+                text = editor.state.doc.textBetween(range.from, range.to, ' ');
+                setLinkRange({ from: range.from, to: range.to });
+            }
+        } else {
+            setLinkRange({ from, to });
+        }
+
+        setLinkUrl(url);
+        setLinkText(text);
+        setIsLinkModalOpen(true);
+    };
+
+    const handleSaveLink = () => {
+        if (!editor || !linkRange) return;
+
+        editor.chain()
+            .focus()
+            .deleteRange({ from: linkRange.from, to: linkRange.to })
+            .insertContent([
+                {
+                    type: 'text',
+                    text: linkText || linkUrl,
+                    marks: [
+                        {
+                            type: 'link',
+                            attrs: { href: linkUrl }
+                        }
+                    ]
+                }
+            ])
+            .run();
+
+        setIsLinkModalOpen(false);
+        setLinkRange(null);
+    };
+
+    const handleRemoveLink = () => {
+        if (!editor || !linkRange) return;
+
+        editor.chain()
+            .focus()
+            .extendMarkRange('link')
+            .unsetLink()
+            .run();
+
+        setIsLinkModalOpen(false);
+        setLinkRange(null);
     };
 
     const removeTag = async (t: string) => {
@@ -706,10 +1334,7 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                                         <div className={styles.bubbleDivider} />
 
                                         <button 
-                                            onClick={() => {
-                                                const url = window.prompt('URL');
-                                                if (url) editor.chain().focus().setLink({ href: url }).run();
-                                            }} 
+                                            onClick={handleOpenLinkModal} 
                                             className={`${styles.bubbleBtn} ${editor.isActive('link') ? styles.bubbleBtnActive : ''}`}
                                             title="Link"
                                         >
@@ -776,7 +1401,11 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                             {/* Read Mode Selection Menu (Manually Positioned) */}
                             {selectionMenuPos && (
                                 <div className={styles.floatingMenu} style={{
-                                    position: 'fixed', top: selectionMenuPos.top, left: selectionMenuPos.left, zIndex: 10000
+                                    position: 'fixed', 
+                                    top: selectionMenuPos.top, 
+                                    left: selectionMenuPos.left, 
+                                    zIndex: 2147483647, // Max Z-Index
+                                    visibility: 'visible'
                                 }}>
                                     <button onClick={handleAddComment} title="Add Comment" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                         <MessageSquareText size={14} /> Add Comment
@@ -792,32 +1421,62 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                                  const isEditingThis = editingCommentId === comment.id;
 
                                  return (
-                                     <div className={styles.commentPopup} style={{
-                                         position: 'fixed',
-                                         top: commentPopupPos.top + 10,
-                                         left: commentPopupPos.left,
-                                         zIndex: 10000,
-                                         backgroundColor: '#ffffff',
-                                         minWidth: 260
-                                     }}>
+                                     <div 
+                                         ref={popupRef}
+                                         className={styles.commentPopup} 
+                                         style={{
+                                             position: 'fixed',
+                                             top: commentPopupPos.top, // Removed +10 - positioning logic handles spacing
+                                             left: commentPopupPos.left,
+                                             zIndex: 10000,
+                                             backgroundColor: '#ffffff',
+                                             width: commentPopupPos.width || 260,
+                                             maxWidth: '90vw'
+                                         }}
+                                     >
                                          {isEditingThis ? (
                                              // Edit Mode (Clean Input)
                                              <div style={{ padding: '12px' }}>
                                                  <textarea 
                                                      value={editingCommentText}
                                                      onChange={e => setEditingCommentText(e.target.value)}
+                                                     maxLength={1000}
                                                      style={{ 
-                                                         width: '100%', minHeight: 80, padding: 8, 
-                                                         border: '1px solid var(--accent)', borderRadius: 6,
-                                                         fontSize: '0.95rem', fontFamily: 'inherit',
-                                                         outline: 'none', resize: 'vertical',
+                                                         width: '100%', 
+                                                         minHeight: 80, 
+                                                         maxHeight: editingCommentText.length >= 500 ? 200 : 'none',
+                                                         overflowY: editingCommentText.length >= 500 ? 'auto' : 'visible',
+                                                         padding: 8, 
+                                                         border: '1px solid var(--accent)', 
+                                                         borderRadius: 6,
+                                                         fontSize: '0.95rem', 
+                                                         fontFamily: 'inherit',
+                                                         outline: 'none', 
+                                                         resize: 'vertical',
                                                          background: 'var(--surface)'
                                                      }}
                                                      autoFocus
                                                  />
+                                                 <div style={{ 
+                                                     fontSize: '0.75rem', 
+                                                     color: editingCommentText.length >= 900 ? 'var(--error, #ef4444)' : 'var(--secondary)', 
+                                                     marginTop: 4,
+                                                     textAlign: 'right'
+                                                 }}>
+                                                     {editingCommentText.length}/1000
+                                                 </div>
                                                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
                                                      <button 
-                                                         onClick={() => setEditingCommentId(null)}
+                                                         onClick={() => {
+                                                             if (isNewComment && editingCommentId) {
+                                                                 // New comment - delete it
+                                                                 handleDeleteComment(editingCommentId);
+                                                             } else {
+                                                                 // Existing comment - just cancel edit
+                                                                 setEditingCommentId(null);
+                                                                 setIsNewComment(false);
+                                                             }
+                                                         }}
                                                          style={{ fontSize: '0.8rem', padding: '4px 10px', cursor: 'pointer', background: 'none', border: '1px solid var(--border)', borderRadius: 4 }}
                                                      >
                                                          Cancel
@@ -837,11 +1496,16 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                                                      <span className={styles.commentMeta}>
                                                          {new Date(comment.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                                      </span>
-                                                 </div>
-                                                 
-                                                 <div className={styles.commentBody}>
-                                                     {comment.text}
-                                                 </div>
+                                                  </div>
+                                                  
+                                                  <div className={styles.commentBody} style={{ 
+                                                      maxHeight: '300px', 
+                                                      overflowY: 'auto',
+                                                      padding: '12px',
+                                                      flex: 1
+                                                  }}>
+                                                      {comment.text}
+                                                  </div>
 
                                                  <div className={styles.commentActions}>
                                                      <button 
@@ -869,13 +1533,152 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                              })()}
 
                              {/* Main Content */}
-                             <div className={isEditing ? styles.editorEditable : styles.editorReadonly}>
-                                <EditorContent editor={editor} />
+                             <div 
+                                 ref={editorContainerRef}
+                                 className={isEditing ? styles.editorEditable : styles.editorReadonly} 
+                                 style={{ position: 'relative' }}
+                             >
+                                 {/* Sidebar Comment Icons Layer */}
+                                 <div style={{ 
+                                     position: 'absolute', 
+                                     left: -25, // Adjusted from -40 to be closer
+                                     top: 0, 
+                                     bottom: 0, 
+                                     width: 20, 
+                                     pointerEvents: 'none',
+                                     zIndex: 50
+                                 }}>
+                                     {sidebarIcons.map((icon, idx) => (
+                                         <div 
+                                             key={idx}
+                                             style={{
+                                                 position: 'absolute',
+                                                 top: icon.top,
+                                                 left: icon.left, 
+                                                 pointerEvents: 'auto',
+                                                 cursor: 'pointer',
+                                                 display: 'flex',
+                                                 alignItems: 'center',
+                                                 justifyContent: 'center',
+                                                 color: 'var(--secondary)',
+                                                 opacity: 0.6,
+                                                 transition: 'opacity 0.2s',
+                                                 zIndex: 100
+                                             }}
+                                             onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                                             onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.6')}
+                                             onClick={() => {
+                                                 if (editor) {
+                                                     // 1. Find the highlight range for this comment
+                                                     let highlightRange: {from: number, to: number} | null = null;
+                                                     editor.state.doc.descendants((node, pos) => {
+                                                         if (highlightRange || !node.isText) return;
+                                                         const mark = node.marks.find(m => m.type.name === 'highlight' && m.attrs.commentId === icon.firstCommentId);
+                                                         if (mark) {
+                                                             highlightRange = { from: pos, to: pos + node.nodeSize };
+                                                         }
+                                                     });
+
+                                                     if (highlightRange) {
+                                                      // Flag as intentional so it opens even in Edit Mode
+                                                      lastInteractionRef.current = 'mouse';
+                                                      // 2. Focus and select the highlight to trigger the regular popup logic
+                                                      editor.chain().focus().setTextSelection(highlightRange).run();
+                                                      setActiveCommentId(icon.firstCommentId);
+                                                  }
+                                                 }
+                                             }}
+                                         >
+                                             <MessageSquare size={16} strokeWidth={2.5} />
+                                             {icon.count > 1 && (
+                                                 <span style={{
+                                                     position: 'absolute',
+                                                     top: -6,
+                                                     right: -8,
+                                                     backgroundColor: 'var(--accent)',
+                                                     color: 'white',
+                                                     fontSize: '10px',
+                                                     fontWeight: 'bold',
+                                                     minWidth: '16px',
+                                                     height: '16px',
+                                                     borderRadius: '50%',
+                                                     display: 'flex',
+                                                     alignItems: 'center',
+                                                     justifyContent: 'center',
+                                                     border: '1.5px solid white'
+                                                 }}>
+                                                     {icon.count}
+                                                 </span>
+                                             )}
+                                         </div>
+                                     ))}
+                                 </div>
+                                 <EditorContent editor={editor} />
                              </div>
                         </>
                     )}
                 </div>
             </div>
+
+            {/* Link Editor Modal */}
+            {isLinkModalOpen && (
+                <div className={styles.modalOverlay} style={{ zIndex: 11000 }} onClick={() => setIsLinkModalOpen(false)}>
+                    <div className={styles.modalContent} onClick={e => e.stopPropagation()} style={{ width: 400, padding: '1.5rem' }}>
+                        <h3 style={{ margin: '0 0 1rem 0' }}>Edit Link</h3>
+                        
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                            <div>
+                                <label style={{ display: 'block', fontSize: '0.8rem', opacity: 0.6, marginBottom: 4 }}>Text to display</label>
+                                <input 
+                                    type="text" 
+                                    value={linkText} 
+                                    onChange={e => setLinkText(e.target.value)}
+                                    placeholder="Display text"
+                                    style={{ width: '100%', padding: '0.5rem', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--foreground)' }}
+                                    autoFocus
+                                />
+                            </div>
+                            
+                            <div>
+                                <label style={{ display: 'block', fontSize: '0.8rem', opacity: 0.6, marginBottom: 4 }}>Link URL</label>
+                                <input 
+                                    type="text" 
+                                    value={linkUrl} 
+                                    onChange={e => setLinkUrl(e.target.value)}
+                                    placeholder="https://..."
+                                    style={{ width: '100%', padding: '0.5rem', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--foreground)' }}
+                                />
+                            </div>
+                            
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem' }}>
+                                <button 
+                                    onClick={handleRemoveLink}
+                                    style={{ color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.9rem' }}
+                                >
+                                    Remove Link
+                                </button>
+                                
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    <button 
+                                        onClick={() => setIsLinkModalOpen(false)}
+                                        className={styles.secondaryButton}
+                                        style={{ padding: '4px 12px' }}
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button 
+                                        onClick={handleSaveLink}
+                                        className={styles.primaryButton}
+                                        style={{ padding: '4px 12px' }}
+                                    >
+                                        Save
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Inline Styles for Tiptap (Scoped) */}
             <style jsx global>{`
@@ -946,6 +1749,42 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                 }
                 .${styles.floatingMenu} button:hover {
                     background: rgba(0,0,0,0.05);
+                }
+                
+                /* Comment Highlights - Subtle by default, vibrant when active */
+                mark[data-comment-id] {
+                    background-color: rgba(255, 237, 160, 0.3) !important; /* Pale yellow, subtle */
+                    border-bottom: 1px solid rgba(255, 193, 7, 0.3);
+                    border-radius: 2px;
+                    padding: 2px 0;
+                    transition: all 0.2s ease;
+                    cursor: pointer;
+                }
+                
+                mark[data-comment-id]:hover {
+                    background-color: rgba(255, 237, 160, 0.5) !important;
+                    border-bottom-color: rgba(255, 193, 7, 0.5);
+                }
+                
+                /* Active highlight - when viewing its comment */
+                mark[data-comment-id].active-comment {
+                    background-color: rgba(255, 235, 59, 0.6) !important; /* More vibrant */
+                    border-bottom: 2px solid rgba(255, 193, 7, 0.8);
+                    box-shadow: 0 0 0 2px rgba(255, 235, 59, 0.15);
+                }
+
+                /* Link Styling */
+                .ProseMirror a, 
+                .ProseMirror a * {
+                    color: #2563eb !important; /* Standard Blue for clear visibility */
+                    text-decoration: underline !important;
+                    text-decoration-thickness: 1.5px !important;
+                    text-underline-offset: 3px;
+                    cursor: pointer !important;
+                }
+                .ProseMirror a:hover {
+                    color: #1d4ed8 !important;
+                    text-decoration-thickness: 2px !important;
                 }
             `}</style>
         </div>
