@@ -73,6 +73,16 @@ Meechi is built with the latest web technologies to ensure speed, privacy, and r
 
 ## 📜 Development Changelog
 
+### v0.9.95 - Living History (Jan 2026)
+*   **Continuous Chat History**: The chat no longer feels ephemeral.
+    *   **Auto-Load**: Automatically loads previous days if the current day is quiet (Min 20 / Max 30 User Turns).
+    *   **Time Gaps**: Displays "X hours ago" dividers to visualize time passed between sessions.
+    *   **Mode Tagging**: Messages are now tagged with icons (📝 Log, 💬 Chat, 🔍 Research) for future filtering.
+*   **UI/UX Polish**:
+    *   **Right-Aligned Bubbles**: User messages are now distinctively right-aligned and cleaner.
+    *   **Scroll Fix**: Removed the jarring scroll animation on page reload; history now appears instantly.
+    *   **Time Format**: Switched to 24h format with Date context for older messages.
+
 ### v0.9.9 - Stability & Grounding (Jan 2026)
 *   **Strict Grounding**:
     *   **Orphan Clean-up**: Added a dedicated `cleanup_orphans` tool to safely remove "ghost" source files from deleted PDFs.
@@ -98,70 +108,3 @@ Meechi is built with the latest web technologies to ensure speed, privacy, and r
 
 ### v0.9.0 - Rebranding & UI Polish (Dec 2025)
 *   **Complete Rebranding**: Officially transitioned all "Michio" references to **"Meechi"** across UI, Database, and System Prompts.
-*   **Typography Overhaul**:
-    *   **Headings**: Switched to **Lora** (Serif) for a warm, distinguished aesthetic.
-    *   **UI & Inputs**: Unified on **Inter** (Sans-serif) for maximum legibility.
-    *   **Markdown**: Added full markdown supporting via `react-markdown` (Bold, Italic, Lists) in both Chat and Source Viewer.
-*   **UX Enhancements**:
-    *   **Smart Explorer**: Topic Explorer now persists your folder state and automatically re-opens when closing a file (Back Navigation).
-    *   **Chat Layout**: Improved visual separation between User (Right) and Meechi (Left) messages.
-    *   **Legibility**: Standardized base font size to 16px with optimized line-height (1.6).
-
-
-### v0.9.0 - Codebase Cleanup & UI Polish (Jan 2026)
-*   **Smart Scroll v2**:
-    *   **Instant Load**: Chat history now loads instantly without visual "jumping" or animation.
-    *   **Floating Scroll Button**: Added a "Scroll to Bottom" button for easy navigation when reading history.
-    *   **Auto-Scroll**: Smooth scrolling for new messages while respecting user's read position.
-*   **Offline Optimization**:
-    *   **Local PDF Parser**: Moved the PDF worker to local storage, removing the dependency on external CDNs. This enables **True Offline** PDF reading.
-*   **Codebase Hygiene**:
-    *   **Ghost Busting**: Removed legacy code (`GuestJournal`, `lib/gemini.ts`) and unified the database architecture into `MeechiDB`.
-    *   **Migration**: Added automated migration to ensure old journal entries are preserved during the upgrade.
-
-### v0.8.0 - The Meechi Rebrand (Dec 2025)
-*   **Identity**: Transitioned to "Meechi" with the Sage & Paper design language.
-*   **Typography**: Adopted Inter (Headings) and Merriweather (Content) for a book-like reading experience.
-*   **Local Intelligence**: Fully stabilized WebGPU-based Local AI implementation with auto-crash recovery on GPU context loss.
-*   **Theme Engine**: Implemented `next-themes` with a reliable light/dark mode toggle.
-
-### v0.7.0 - The Agentic Upgrade (Dec 2025)
-*   **AI Agency**:
-    *   **File Creation & Editing**: Meechi can now create, edit, and organize notes directly via chat (e.g., "Create a shopping list folder").
-    *   **Tool Usage**: Implemented a robust "Tool Calling" loop where the AI requests actions (Create/Update) and the client executes them securely.
-*   **Auto-Summarization**:
-    *   **Smart Ingestion**: Uploaded PDFs and text files are automatically summarized by a smaller LLM call, creating concise "anchors" for better RAG retrieval.
-    *   **Dynamic Updates**: Edited files are re-summarized on the fly to keep the Knowledge Base fresh.
-
-### v0.6.0 - The "Rolling Context" (Dec 2025)
-*   **Rolling Window Context**: Replaced static "Daily Log" context with a dynamic "6-Hour Rolling Window". This ensures conversation memory persists across midnight while optimizing token usage.
-*   **Context Transparency**: Added real-time Token Counters (Session Total & Per-Message).
-*   **UX Polish**:
-    *   **Auto-Expanding Chat**: Input box grows with content.
-    *   **Timestamps**: Precise messaging timing.
-    *   **Load More**: Efficient pagination for long chat histories.
-
-### v0.5.0 - Local-First Stabilization (Dec 2025)
-*   **TensorFlow.js Migration**: Moved RAG engine from Transformers.js to **TensorFlow.js** + Universal Sentence Encoder.
-    *   *Why?* Native JS/WebGL support ensures superior stability and build reliability in Next.js 16/Turbopack, preventing Web Worker crashes.
-*   **Splinter-Proof Sync**: Implemented ID-based synchronization logic to robustly handle folder moves and renames between Local DB and Google Drive.
-*   **Offline-First**: Re-architected storage to use Dexie.js (IndexedDB) as the source of truth.
-
-### v0.2.0 - Customization & Gemini (Dec 2025)
-*   **Gemini AI Support**: Added Google Gemini as a fallback AI provider.
-*   **Conversational Onboarding**: New users are greeted by Meechi and can set preferences naturally.
-*   **Settings UI**: Configuration page for Identity (Name, Tone).
-
-### v0.2.0 - "The Grounded Update" (2025-01-01)
-- **Deep Grounding**: Fixed RAG context injection for small models (1B/3B). Meechi now sees your files reliably.
-- **NotebookLM Style**: Research Mode now outputs structured Executive Summaries and Key Insights by default.
-- **Filename Boosting**: Search algorithm now prioritizes files specifically named in your query.
-- **Anti-Crash System**: Implemented `GPUResourceLock` to prevent browser crashes when running RAG and Chat simultaneously.
-- **Strict Local**: Complete removal of Cloud Fallback unless API keys are explicitly provided.
-- **Default Stability**: Switched default model to **Llama 3.2 1B** for maximum speed and stability on consumer hardware.
-
-### v0.1.0 - The Genesis (Dec 2025)
-*   **Core Setup**: Initialized Next.js 16 app.
-*   **Guest Mode**: Local-only usage for privacy.
-*   **Cloud Integration**: Google Drive OAuth via NextAuth.
-*   **AI Integration**: Groq (Llama 3) connection.

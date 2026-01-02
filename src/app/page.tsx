@@ -27,6 +27,8 @@ export default function Home() {
       role: 'user' | 'michio', 
       content: string, 
       timestamp?: string, 
+      fullDate?: Date,
+      mode?: string,
       usage?: { total_tokens: number }
   }[]>([]);
   
@@ -164,114 +166,7 @@ export default function Home() {
       return null;
   }
 
-  async function handleChat(e: React.FormEvent) {
-    e.preventDefault();
-    if (!chatInput.trim()) return;
 
-    const userMsg = chatInput;
-    setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
-    setChatInput("");
-    setIsChatting(true);
-    scrollToBottom();
-    
-    const timestamp = new Date().toLocaleTimeString();
-    
-    // 1. Save User Message Locally
-    let logEntry = `### ${timestamp}\n**User**: ${userMsg}\n`;
-    if (attachedFiles.length > 0) {
-        const attInfo = attachedFiles.map(f => `[Attached: ${f.path}]`).join(', ');
-        logEntry = `### ${timestamp}\n**User**: ${userMsg}\n${attInfo}\n`;
-    }
-    await storage.appendFile(`history/${currentDate}.md`, logEntry);
-    
-    // Estimate tokens
-    const estimatedTokens = Math.ceil(userMsg.length / 4);
-    setMessages(prev => {
-        const newArr = [...prev];
-        return newArr;
-    });
-
-    // 2. Read Context (STRICTLY Conditional)
-    let knowledgeContext = "";
-    if (meechi.mode === 'research') {
-        console.log(`[Page] Research Mode: Retrieving Context...`);
-        // This will acquire the GPU Lock for Embeddings
-        knowledgeContext = await storage.getKnowledgeContext(userMsg);
-        console.log(`[Page] RAG Retrieval: ${knowledgeContext.length} chars found`);
-    } else {
-        console.log(`[Page] ${meechi.mode} Mode: Skipping RAG`);
-    }
-    
-    // Read local conversation history (Fast, no GPU)
-    const localHistory = await storage.getRecentLogs(6); 
-    
-    let fullContext = `${knowledgeContext}\n\n--- Current Conversation History (Last 6h) ---\n${localHistory}`;
-    if (attachedFiles.length > 0) {
-        fullContext += `\n\n[SYSTEM: User has attached files. Look at 'temp/' folder if needed. Tools available: move_file, fetch_url.]`;
-        setAttachedFiles([]);
-    }
-
-    // 3. LOG MODE: Stop here.
-    if (meechi.mode === 'log') {
-        setIsChatting(false);
-        return; 
-    }
-
-    // 4. CHAT/RESEARCH MODE: Proceed to AI
-    const historyForAI: AIChatMessage[] = messages.slice(-10).map(m => ({
-        role: m.role === 'michio' ? 'assistant' : 'user',
-        content: m.content
-    }));
-
-    const respTimestamp = new Date().toLocaleTimeString();
-    let currentContent = "";
-    
-    // Add placeholder for Assistant
-    setMessages(prev => [...prev, { role: 'michio', content: "...", timestamp: respTimestamp }]);
-
-    await meechi.chat(
-        userMsg,
-        historyForAI,
-        fullContext,
-        (chunk) => {
-             currentContent += chunk;
-             setMessages(prev => {
-                const newArr = [...prev];
-                const lastIdx = newArr.length - 1;
-                // Ensure we are updating the assistant message
-                if (newArr[lastIdx] && newArr[lastIdx].role === 'michio') {
-                     newArr[lastIdx] = { ...newArr[lastIdx], content: currentContent };
-                }
-                return newArr;
-             });
-        },
-        (toolName) => {
-            // Optional: Show tool activity?
-            console.log(`[UI] Tool execution started: ${toolName}`);
-        },
-        async (toolResult) => {
-            // Append tool result to content
-            currentContent += toolResult;
-            
-             setMessages(prev => {
-                const newArr = [...prev];
-                const lastIdx = newArr.length - 1;
-                if (newArr[lastIdx] && newArr[lastIdx].role === 'michio') {
-                     newArr[lastIdx] = { ...newArr[lastIdx], content: currentContent };
-                }
-                return newArr;
-             });
-        }
-    );
-
-    // 5. Final Save to History
-    if (currentContent) {
-        const finalLogEntry = `### ${respTimestamp}\n**Meechi**: ${currentContent}\n\n`;
-        await storage.appendFile(`history/${currentDate}.md`, finalLogEntry);
-    }
-    
-    setIsChatting(false);
-  }
 
   const handleDateSelect = (date: string) => {
       setCurrentDate(date);
@@ -323,115 +218,352 @@ export default function Home() {
       setShowScrollButton(!isAtBottom);
   };
 
-  function parseLogToMessages(log: string) {
+  // Helper: Format Time for UI
+  const formatMessageTime = (date?: Date, includeDate = false) => {
+      if (!date) return '';
+      // 24h format: HH:mm
+      const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+      
+      if (includeDate) {
+          const dateStr = `${date.getMonth() + 1}/${date.getDate()}`;
+          return `${dateStr} ${timeStr}`; // 1/15 14:30
+      }
+      return timeStr;
+  };
+
+  const getModeIcon = (mode?: string) => {
+      switch (mode?.toLowerCase()) {
+          case 'log': return '📝';
+          case 'research': return '🔍';
+          case 'chat': return '💬';
+          default: return '';
+      }
+  };
+
+    // Helper: Parse Log with Mode and Date Context
+  function parseLogToMessages(log: string, dateStr: string) {
     if (!log) return [];
     
     // Split by '### ' which denotes a new entry with timestamp
-    // Format: "### 10:30:00 PM\n**User**: hello..."
+    // Format: "### 10:30:00 PM [Mode: chat]" OR "### 22:30 [Mode: chat]"
     const chunks = log.split('### ').filter(c => c.trim());
     
     const msgs: {
         role: 'user' | 'michio', 
         content: string, 
         timestamp?: string,
+        fullDate?: Date,
+        mode?: string, // Added Mode
         usage?: { total_tokens: number }
     }[] = [];
 
     chunks.forEach(chunk => {
-      // Extract first line (timestamp)
-      const lines = chunk.split('\n');
-      const timestamp = lines[0]?.trim(); // "10:30:00 PM"
-      const body = lines.slice(1).join('\n'); // Rest of message
-      
-      const userMatch = body.match(/\*\*User\*\*: ([\s\S]*?)(?=\n\*\*Meechi\*\*|\n\*\*Michio\*\*|$)/);
-      const michioMatch = body.match(/\*\*(?:Meechi|Michio)\*\*: ([\s\S]*)/);
-      
-      if (userMatch && userMatch[1]) {
-          msgs.push({ 
-              role: 'user', 
-              content: userMatch[1].trim(),
-              timestamp 
-          });
-      }
-      if (michioMatch && michioMatch[1]) {
-          msgs.push({ 
-              role: 'michio', 
-              content: michioMatch[1].trim(),
-              timestamp 
-          });
-      }
+        // Extract Header Line (Timestamp + Optionals)
+        const headerEndFn = chunk.indexOf('\n');
+        const headerLine = chunk.substring(0, headerEndFn).trim(); 
+        const body = chunk.substring(headerEndFn + 1);
+
+        // Parse Timestamp: "10:30:00 PM" or "22:30:00"
+        const timeMatch = headerLine.match(/^(\d{1,2}:\d{2}(?::\d{2})?\s?(?:AM|PM|am|pm)?)/i);
+        const timestampRaw = timeMatch ? timeMatch[1] : undefined;
+
+        // Parse Mode: "[Mode: research]"
+        const modeMatch = headerLine.match(/\[Mode:\s*(\w+)\]/i);
+        const mode = modeMatch ? modeMatch[1] : undefined;
+
+        // Construct Full Date Object for Sorting
+        let fullDate: Date | undefined;
+        if (timestampRaw && dateStr) {
+             const [timePart, modifier] = timestampRaw.trim().split(' ');
+             let [hours, minutes, seconds] = timePart.split(':').map(Number);
+             
+             if (modifier) {
+                 if (modifier.toUpperCase() === 'PM' && hours < 12) hours += 12;
+                 if (modifier.toUpperCase() === 'AM' && hours === 12) hours = 0;
+             }
+             
+             // Create date from file date (YYYY-MM-DD)
+             const [y, m, d] = dateStr.split('-').map(Number);
+             fullDate = new Date(y, m - 1, d, hours || 0, minutes || 0, seconds || 0);
+        }
+
+        // Parse Body for Role and Content
+        if (body.includes('**User**:')) {
+             const content = body.replace('**User**:', '').trim();
+             msgs.push({ role: 'user', content, timestamp: timestampRaw, fullDate, mode });
+        } else if (body.includes('**Meechi**:')) {
+             const content = body.replace('**Meechi**:', '').trim();
+             msgs.push({ role: 'michio', content, timestamp: timestampRaw, fullDate, mode });
+        }
     });
+
     return msgs;
   }
 
-  // Effect: Auto-scroll on new messages
+  // Effect: Initial Load (Continuous History)
   useEffect(() => {
-      if (messages.length === 0) return;
+    async function loadContinuousHistory() {
+        if (!currentDate) return;
+        
+        setIsLoadingHistory(true);
+        try {
+            await storage.init();
+            
+            let allMessages: any[] = [];
+            let userTurnCount = 0;
+            const MIN_USER_TURNS = 20;
+            const MAX_USER_TURNS = 30;
 
-      const isUserMsg = messages[messages.length - 1].role === 'user';
-      
-      // If it's the User's message, we always smooth scroll to acknowledge it.
-      if (isUserMsg) {
-         scrollToBottom('smooth');
-      } 
-      // If it's the FIRST load (hasn't scrolled yet), we INSTANT scroll (behavior: auto).
-      else if (!hasScrolledRef.current) {
-         scrollToBottom('instant'); // 'instant' or 'auto'
-         hasScrolledRef.current = true;
-      }
-      // If none of the above (e.g. AI streaming), preserve standard behavior
-      // (Scroll if near bottom)
-      else if (streamRef.current) {
-           const { scrollTop, scrollHeight, clientHeight } = streamRef.current;
-           const isAtBottom = scrollHeight - scrollTop <= clientHeight + 150;
-           if (isAtBottom) scrollToBottom('smooth');
-      }
-  }, [messages]);
-
-  // Effect: Initial Load
-  useEffect(() => {
-    async function load() {
-        if (currentDate) {
-            setIsLoadingHistory(true);
-            try {
-                await storage.init();
-                const content = await storage.readFile(`history/${currentDate}.md`) || "";
+            // Start from selected date (usually today)
+            const [y, m, d] = currentDate.split('-').map(Number);
+            let loopDate = new Date(y, m - 1, d);
+            
+            // Loop backwards until we have enough USER turns
+            for (let i = 0; i < 365; i++) {
+                const dateStr = formatDateForFile(loopDate);
+                const content = await storage.readFile(`history/${dateStr}.md`);
 
                 if (content && typeof content === 'string' && !content.startsWith("No journal")) {
-                    // SANITIZATION
+                     // SANITIZATION
                     let cleanContent = content.replace(/<function[\s\S]*?(?:<\/function>|$)/gi, '');
                     cleanContent = cleanContent.replace(/^\*\*Meechi\*\*: Settings updated.*?(\n|$)/gmi, ""); 
                     cleanContent = cleanContent.replace(/^\*\*Meechi\*\*: I will call you.*?(\n|$)/gmi, "");
                     cleanContent = cleanContent.replace(/Settings updated\. I will call you.*?(\n|$)/gmi, "");
 
                     if (cleanContent.length !== content.length) {
-                        await storage.saveFile(`history/${currentDate}.md`, cleanContent);
+                         if (dateStr === currentDate) {
+                             await storage.saveFile(`history/${dateStr}.md`, cleanContent);
+                         }
                     }
 
-                    const parsed = parseLogToMessages(cleanContent);
-                    const visibleMessages = parsed.slice(-historyLimit);
-                    setMessages(visibleMessages);
-                    // (Scroll is handled by the useEffect above triggers on 'messages')
-                } else {
-                    setMessages([]);
-                    const config = await settingsManager.getConfig();
-                    if (config.identity.name === 'Traveler') {
-                         setMessages([{
-                             role: 'michio',
-                             content: "Hello! I am Michio, your personal cognitive partner. We haven't been properly introduced yet. What should I call you?",
-                             timestamp: new Date().toLocaleTimeString()
-                         }]);
+                    const parsed = parseLogToMessages(cleanContent, dateStr);
+                    
+                    // Prepend to array (since we are going backwards in time)
+                    allMessages = [...parsed, ...allMessages];
+                    
+                    // Count User Turns in this chunk
+                    userTurnCount += parsed.filter(m => m.role === 'user').length;
+                }
+
+                if (userTurnCount >= MIN_USER_TURNS) break;
+
+                // Go to previous day
+                loopDate.setDate(loopDate.getDate() - 1);
+            }
+
+            // Trimming Logic: Keep Max 30 User Turns
+            const totalUserMessages = allMessages.filter(m => m.role === 'user');
+            if (totalUserMessages.length > MAX_USER_TURNS) {
+                // Find the Nth user message from the end (where N = MAX)
+                // We want the last 30 user messages.
+                // The index of the first user message we want is: length - 30
+                const cutoffIndex = totalUserMessages.length - MAX_USER_TURNS;
+                
+                // Now find the actual index in allMessages corresponding to that user message
+                let userCount = 0;
+                let splitIndex = 0;
+                
+                for (let i = 0; i < allMessages.length; i++) {
+                    if (allMessages[i].role === 'user') {
+                        userCount++;
+                        if (userCount === cutoffIndex + 1) { // This is the first one we keep
+                             splitIndex = i;
+                             break;
+                        }
                     }
                 }
-            } catch (err) {
-                console.error("Failed to load history", err);
-            } finally {
-                setIsLoadingHistory(false);
+                
+                // Slice from that index
+                allMessages = allMessages.slice(splitIndex);
             }
+
+            // Fallback: If empty, check onboarding
+            if (allMessages.length === 0) {
+                 const config = await settingsManager.getConfig();
+                 if (config.identity.name === 'Traveler') {
+                      allMessages = [{
+                          role: 'michio',
+                          content: "Hello! I am Michio, your personal cognitive partner. We haven't been properly introduced yet. What should I call you?",
+                          timestamp: formatMessageTime(new Date()),
+                          fullDate: new Date(),
+                          mode: 'chat'
+                      }];
+                 }
+            }
+            
+            setMessages(allMessages);
+            
+            // Initial Scroll Logic
+            if (allMessages.length > 0) {
+                setTimeout(() => {
+                    if (streamRef.current) {
+                        streamRef.current.scrollTop = streamRef.current.scrollHeight;
+                        hasScrolledRef.current = true;
+                    }
+                }, 50); 
+            }
+
+        } catch (err) {
+            console.error("Failed to load history", err);
+        } finally {
+            setIsLoadingHistory(false);
         }
     }
-    load();
-  }, [currentDate, storage, historyLimit]);
+    loadContinuousHistory();
+  }, [currentDate, storage]); 
+
+
+  // Helper: Relative Time Formatter (Time Ago)
+  function getRelativeTime(date1: Date, fromDate: Date) {
+      // Calculate diff from 'fromDate' (usually NOW) to 'date1' (message time)
+      const diffMs = fromDate.getTime() - date1.getTime();
+      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+      const diffDays = Math.floor(diffHours / 24);
+
+      if (diffDays > 0) {
+          return diffDays === 1 ? "Yesterday" : `${diffDays} days ago`;
+      }
+      if (diffHours > 0) {
+          return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+      }
+      return null;
+  }
+
+  // Helper: Format Date for filename
+  const formatDateForFile = (date: Date) => {
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  };
+
+  async function handleChat(e: React.FormEvent) {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+
+    const userMsg = chatInput;
+    // Current Time for UI (24h)
+    const now = new Date();
+    // We store fullDate, rendering will handle formatting
+    const timestampDisplay = formatMessageTime(now); 
+
+    // Optimistic Update
+    setMessages(prev => [...prev, { 
+        role: 'user', 
+        content: userMsg, 
+        timestamp: timestampDisplay,
+        fullDate: now,
+        mode: meechi.mode
+    }]);
+    
+    setChatInput("");
+    setIsChatting(true);
+    scrollToBottom();
+    
+    // 1. Save User Message Locally (With Mode Tag & 24h Time)
+    // Format: "### 22:30 [Mode: chat]"
+    // Use standard 24h string for storage "22:30:00"
+    const storageTime = now.toLocaleTimeString([], { hour12: false });
+    
+    let logEntry = `### ${storageTime} [Mode: ${meechi.mode}]\n**User**: ${userMsg}\n`;
+    if (attachedFiles.length > 0) {
+        const attInfo = attachedFiles.map(f => `[Attached: ${f.path}]`).join(', ');
+        logEntry = `### ${storageTime} [Mode: ${meechi.mode}]\n**User**: ${userMsg}\n${attInfo}\n`;
+    }
+    await storage.appendFile(`history/${currentDate}.md`, logEntry);
+    
+    // Estimate tokens
+    setMessages(prev => {
+        const newArr = [...prev];
+        return newArr;
+    });
+
+    // 2. Read Context (STRICTLY Conditional)
+    let knowledgeContext = "";
+    if (meechi.mode === 'research') {
+        console.log(`[Page] Research Mode: Retrieving Context...`);
+        // This will acquire the GPU Lock for Embeddings
+        knowledgeContext = await storage.getKnowledgeContext(userMsg);
+        console.log(`[Page] RAG Retrieval: ${knowledgeContext.length} chars found`);
+    } else {
+        console.log(`[Page] ${meechi.mode} Mode: Skipping RAG`);
+    }
+    
+    // Read local conversation history (Fast, no GPU)
+    const localHistory = await storage.getRecentLogs(6); 
+    
+    let fullContext = `${knowledgeContext}\n\n--- Current Conversation History (Last 6h) ---\n${localHistory}`;
+    if (attachedFiles.length > 0) {
+        fullContext += `\n\n[SYSTEM: User has attached files. Look at 'temp/' folder if needed. Tools available: move_file, fetch_url.]`;
+        setAttachedFiles([]);
+    }
+
+    // 3. LOG MODE: Stop here.
+    if (meechi.mode === 'log') {
+        setIsChatting(false);
+        return; 
+    }
+
+    // 4. CHAT/RESEARCH MODE: Proceed to AI
+    const historyForAI: AIChatMessage[] = messages.slice(-10).map(m => ({
+        role: m.role === 'michio' ? 'assistant' : 'user',
+        content: m.content
+    }));
+
+    const respTimestamp = new Date().toLocaleTimeString([], { hour12: false });
+    const respTimeDisplay = formatMessageTime(new Date()); 
+
+    let currentContent = "";
+    
+    // Add placeholder for Assistant
+    setMessages(prev => [...prev, { 
+        role: 'michio', 
+        content: "...", 
+        timestamp: respTimeDisplay,
+        fullDate: new Date(),
+        mode: meechi.mode
+    }]);
+
+    await meechi.chat(
+        userMsg,
+        historyForAI,
+        fullContext,
+        (chunk) => {
+             currentContent += chunk;
+             setMessages(prev => {
+                const newArr = [...prev];
+                const lastIdx = newArr.length - 1;
+                // Ensure we are updating the assistant message
+                if (newArr[lastIdx] && newArr[lastIdx].role === 'michio') {
+                     newArr[lastIdx] = { ...newArr[lastIdx], content: currentContent };
+                }
+                return newArr;
+             });
+        },
+        (toolName) => {
+             // Optional: Show tool activity?
+             console.log(`[UI] Tool execution started: ${toolName}`);
+        },
+        async (toolResult) => {
+            // Append tool result to content
+            currentContent += toolResult;
+            
+             setMessages(prev => {
+                const newArr = [...prev];
+                const lastIdx = newArr.length - 1;
+                if (newArr[lastIdx] && newArr[lastIdx].role === 'michio') {
+                     newArr[lastIdx] = { ...newArr[lastIdx], content: currentContent };
+                }
+                return newArr;
+             });
+        }
+    );
+
+    // 5. Final Save to History
+    if (currentContent) {
+        const finalLogEntry = `### ${respTimestamp} [Mode: ${meechi.mode}]\n**Meechi**: ${currentContent}\n\n`;
+        await storage.appendFile(`history/${currentDate}.md`, finalLogEntry);
+    }
+    
+    setIsChatting(false);
+  }
 
   return (
     <main className={styles.main}>
@@ -552,51 +684,84 @@ export default function Home() {
                     </div>
                 )}
                 
-                {messages.map((msg, i) => (
-                    <div key={i} className={`${styles.message} ${msg.role === 'user' ? styles.userMessage : styles.michioMessage}`}>
-                        <div style={{ 
-                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                            marginBottom: 4, fontSize: '0.75rem', opacity: 0.6 
-                        }}>
-                             <strong>{msg.role === 'michio' ? 'Meechi' : 'You'}</strong>
-                             <span>{msg.timestamp}</span>
-                        </div>
-                        
-                        {msg.role === 'michio' ? (
-                            (() => {
-                                const raw = msg.content;
-                                // Clean generic placeholder
-                                if (raw.trim() === '...' || raw.trim() === '…') {
-                                    return <span style={{ animation: 'pulse 1.5s infinite', opacity: 0.7 }}>💡 Deep Thinking...</span>;
-                                }
-
-                                const cleaned = raw.replace(/<function[\s\S]*?(?:<\/function>|$)/gi, '').trim();
-                                const isStartFunc = raw.trim().startsWith('<function');
-                                
-                                // Show "Using Tools" only if we have a function block BUT no human text yet
-                                if (isStartFunc && !cleaned) {
-                                    return <span style={{ animation: 'pulse 1.5s infinite', opacity: 0.7 }}>🛠️ Using Tools...</span>;
-                                }
-
-                                return (
-                                    <ReactMarkdown>
-                                        {cleaned || raw}
-                                    </ReactMarkdown>
+                {messages.map((msg, i) => {
+                    // Time Divider Logic
+                    let timeDivider = null;
+                    const isPreviousDay = msg.fullDate && currentDate && msg.fullDate.getDate() !== new Date().getDate(); // Check if msg is from diff day
+                    
+                    if (i > 0 && msg.fullDate && messages[i-1].fullDate) {
+                        const gap = msg.fullDate.getTime() - messages[i-1].fullDate!.getTime();
+                        if (gap > 7200000) { // 2 hours
+                            // Use NOW to show "X hours ago" instead of gap size
+                            const relativeText = getRelativeTime(msg.fullDate, new Date()); 
+                            if (relativeText) {
+                                timeDivider = (
+                                    <div className={styles.timeDivider}>
+                                        {relativeText}
+                                    </div>
                                 );
-                            })()
-                        ) : (
-                            <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
-                        )}
-                        
-                        {msg.usage && (
+                            }
+                        }
+                    }
+
+                    // For previous days, show Date + Time
+                    const displayTime = msg.fullDate 
+                        ? formatMessageTime(msg.fullDate, msg.fullDate.toDateString() !== new Date().toDateString())
+                        : msg.timestamp;
+
+                    return (
+                    <div key={i}>
+                        {timeDivider}
+                        <div className={`${styles.message} ${msg.role === 'user' ? styles.userMessage : styles.michioMessage}`}>
                             <div style={{ 
-                                fontSize: '0.65rem', opacity: 0.4, textAlign: 'right', marginTop: 4 
+                                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                marginBottom: 4, fontSize: '0.75rem', opacity: 0.6,
+                                gap: '1rem'
                             }}>
-                                {msg.usage.total_tokens} tok
+                                <strong>{msg.role === 'michio' ? 'Meechi' : 'You'}</strong>
+                                <span style={{display: 'flex', alignItems: 'center', gap: '4px'}}>
+                                    {getModeIcon(msg.mode) && <span title={msg.mode}>{getModeIcon(msg.mode)}</span>}
+                                    {displayTime}
+                                </span>
                             </div>
-                        )}
+                            
+                            {msg.role === 'michio' ? (
+                                (() => {
+                                    const raw = msg.content;
+                                    // Clean generic placeholder
+                                    if (raw.trim() === '...' || raw.trim() === '…') {
+                                        return <span style={{ animation: 'pulse 1.5s infinite', opacity: 0.7 }}>💡 Deep Thinking...</span>;
+                                    }
+
+                                    const cleaned = raw.replace(/<function[\s\S]*?(?:<\/function>|$)/gi, '').trim();
+                                    const isStartFunc = raw.trim().startsWith('<function');
+                                    
+                                    // Show "Using Tools" only if we have a function block BUT no human text yet
+                                    if (isStartFunc && !cleaned) {
+                                        return <span style={{ animation: 'pulse 1.5s infinite', opacity: 0.7 }}>🛠️ Using Tools...</span>;
+                                    }
+
+                                    return (
+                                        <ReactMarkdown>
+                                            {cleaned || raw}
+                                        </ReactMarkdown>
+                                    );
+                                })()
+                            ) : (
+                                <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                            )}
+                            
+                            {msg.usage && (
+                                <div style={{ 
+                                    fontSize: '0.65rem', opacity: 0.4, textAlign: 'right', marginTop: 4 
+                                }}>
+                                    {msg.usage.total_tokens} tok
+                                </div>
+                            )}
+                        </div>
                     </div>
-                ))}
+                    );
+                })}
                 
                 {isLoadingHistory && messages.length > 0 && (
                      <div style={{ textAlign: 'center', fontSize: '0.8rem', opacity: 0.5, margin: '1rem 0' }}>Syncing...</div>

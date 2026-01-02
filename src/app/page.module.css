@@ -67,7 +67,6 @@
   align-items: center;
   padding-bottom: 120px;
   /* Space for fixed input */
-  scroll-behavior: smooth;
 }
 
 .chatStream {
@@ -90,6 +89,9 @@
 
 .userMessage {
   align-self: flex-end;
+  /* Keep for flex contexts */
+  margin-left: auto;
+  /* FORCE right align in block contexts */
   background: var(--surface);
   color: var(--foreground);
   padding: 1rem 1.4rem;
@@ -97,7 +99,11 @@
   border-bottom-right-radius: 4px;
   border: 1px solid var(--border);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
-  min-width: 100px;
+  /* User Bubble Refinements */
+  width: fit-content;
+  min-width: 120px;
+  /* Enough for Name + Time */
+  text-align: left;
 }
 
 .michioMessage {
@@ -107,6 +113,39 @@
   background: transparent;
   width: 90%;
 }
+
+/* Time Divider */
+.timeDivider {
+  width: 100%;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--secondary);
+  margin: 2rem 0;
+  position: relative;
+  opacity: 0.7;
+  font-family: var(--font-sans);
+}
+
+.timeDivider::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 35%;
+  height: 1px;
+  background: var(--border);
+}
+
+.timeDivider::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: 35%;
+  height: 1px;
+  background: var(--border);
+}
+
 
 /* 3. Input Area (Fixed Bottom) */
 .inputArea {
