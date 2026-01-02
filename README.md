@@ -77,7 +77,8 @@ Meechi is built with the latest web technologies to ensure speed, privacy, and r
 ### v0.9.98 - The Writer's Studio (Jan 2026)
 *   **Notion-Like Editor**: A complete overhaul of the writing experience.
     *   **Slash Commands**: Type `/` to instantly insert Headings, Lists, Quotes, Code Blocks, and Dividers.
-    *   **Floating Toolbar**: Select text to access a context-aware menu for Formatting, Colors, and Comments.
+    *   **Floating Toolbar**: Select text to access a context-aware menu for Formatting, Colors, and Comments. (Fixed "Add Comment" visibility regression).
+    *   **Restricted Link Editing**: "Add Link" button is now correctly restricted to Edit Mode only.
     *   **Comment System**: Inline, annotated comments with a dedicated sidebar UI.
     *   **Smart Typography**: Styled Headings (H1-H3), Blockquotes, and Code blocks with JetBrains Mono.
 *   **Visual Polish**:
