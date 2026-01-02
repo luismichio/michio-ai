@@ -69,7 +69,9 @@ export class LocalStorageProvider implements StorageProvider {
             path: r.path,
             updatedAt: r.updatedAt,
             type: r.type,
-            remoteId: r.remoteId
+            remoteId: r.remoteId,
+            tags: r.tags,
+            metadata: r.metadata
         }));
     }
 
@@ -83,7 +85,9 @@ export class LocalStorageProvider implements StorageProvider {
             path: item.path,
             type: item.type,
             updatedAt: item.updatedAt,
-            remoteId: item.remoteId
+            remoteId: item.remoteId,
+            tags: item.tags,
+            metadata: item.metadata
         };
     }
 
@@ -93,7 +97,7 @@ export class LocalStorageProvider implements StorageProvider {
         return file.content;
     }
 
-    async saveFile(virtualPath: string, content: string | Blob | ArrayBuffer, remoteId?: string): Promise<void> {
+    async saveFile(virtualPath: string, content: string | Blob | ArrayBuffer, remoteId?: string, tags?: string[], metadata?: any): Promise<void> {
         await this.ensureParent(virtualPath);
         
         // Optimistic Update
@@ -106,13 +110,42 @@ export class LocalStorageProvider implements StorageProvider {
                 type: 'file',
                 remoteId: remoteId || existing?.remoteId, // Preserve remoteId if updating content locally
                 dirty: 1, // Mark as dirty (needs sync up)
-                deleted: 0
+                deleted: 0,
+                tags: tags !== undefined ? tags : existing?.tags || [],
+                metadata: metadata !== undefined ? metadata : existing?.metadata || {}
             });
         });
 
         if (typeof content === 'string') {
             this.indexFile(virtualPath, content);
         }
+    }
+
+    async updateMetadata(virtualPath: string, updates: { tags?: string[], metadata?: any }): Promise<void> {
+        await db.transaction('rw', db.files, async () => {
+             const existing = await db.files.get(virtualPath);
+             if (!existing) throw new Error(`File not found: ${virtualPath}`);
+
+             await db.files.update(virtualPath, {
+                 ...updates,
+                 updatedAt: Date.now(),
+                 dirty: 1
+             });
+        });
+    }
+
+    async getFilesByTag(tag: string): Promise<FileMeta[]> {
+        const records = await db.files.where('tags').equals(tag).filter(f => !f.deleted).toArray();
+        return records.map(r => ({
+            id: r.path,
+            name: r.path.split('/').pop() || r.path,
+            path: r.path,
+            updatedAt: r.updatedAt,
+            type: r.type,
+            remoteId: r.remoteId,
+            tags: r.tags,
+            metadata: r.metadata
+        }));
     }
 
     async appendFile(virtualPath: string, content: string): Promise<void> {
@@ -419,26 +452,51 @@ export class LocalStorageProvider implements StorageProvider {
                     similarity: cosineSimilarity(queryEmbedding, chunk.embedding)
                 })).sort((a, b) => b.similarity - a.similarity);
 
-                // FILENAME BOOSTING
-                // If the user explicitly mentions a file (e.g. "Schema Theory"), we MUST include it regardless of vector score.
+                // FILENAME & TAG BOOSTING
+                // If the user explicitly mentions a file (e.g. "Schema Theory") or a #tag, we MUST include it regardless of vector score.
                 const queryLower = query.toLowerCase();
                 const boostedChunks: typeof ranked = [];
                 const seenChunkIds = new Set<string>();
 
-                // 1. Find matched files
+                // Extract #tags from query
+                const tagMatches = query.match(/#([\w\-]+)/g) || [];
+                const queryTags = tagMatches.map(t => t.substring(1).toLowerCase());
+
+                // 1. Find matched files (by Name OR Tag)
+                // Use Dexie's index for tags if possible, or filter.
+                let taggedFiles: any[] = [];
+                if (queryTags.length > 0) {
+                     // OR logic for tags
+                     const uniqueTags = Array.from(new Set(queryTags));
+                     for (const t of uniqueTags) {
+                         // We need a way to search case-insensitive on tags array?
+                         // Dexie *tags index is case-sensitive by default usually unless locale.
+                         // For now, let's just iterate all files or use DB efficient search if possible.
+                         // Since we are iterating allFiles below anyway for filename match, let's combine.
+                     }
+                }
+
                 const allFiles = await db.files.toArray();
                 const matchedFiles = allFiles.filter(f => {
                    if (!f.path.startsWith('misc/')) return false;
                    const filename = f.path.split('/').pop()?.toLowerCase() || "";
+                   
+                   // A. Tag Match
+                   if (f.tags && f.tags.some(ft => queryTags.includes(ft.toLowerCase()))) {
+                       return true;
+                   }
+
+                   // B. Filename Match
                    // Boosting Logic: If filename is found in query OR query is found in filename
                    // (ignoring very short queries)
                    if (queryLower.length > 3 && filename.includes(queryLower)) return true;
                    if (filename.length > 3 && queryLower.includes(filename)) return true;
+                   
                    return false;
                 });
 
                 if (matchedFiles.length > 0) {
-                     console.log(`[RAG] Filename Match Found: ${matchedFiles.map(f => f.path).join(', ')}`);
+                     console.log(`[RAG] Boosted Match Found: ${matchedFiles.map(f => f.path).join(', ')}`);
                      // Get all chunks for these files
                      for (const file of matchedFiles) {
                          const fileChunks = allChunks.filter(c => c.filePath === file.path);

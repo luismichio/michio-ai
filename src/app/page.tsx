@@ -7,15 +7,28 @@ import ReactMarkdown from 'react-markdown';
 import { useState, useRef, useEffect } from "react";
 import styles from './page.module.css';
 import CalendarView from './components/CalendarView';
-
-// ... imports
 import { LocalStorageProvider } from '@/lib/storage/local';
+
+import { 
+  FileText, Search, MessageSquare, MessageCircle,
+  Settings, LogOut, ChevronLeft, ChevronRight,
+  Lightbulb, Hammer, AlertTriangle, ArrowUp, ArrowDown, Loader2, FolderOpen
+} from 'lucide-react';
+
+const ModeIcon = ({ mode }: { mode: string }) => {
+    switch (mode.toLowerCase()) {
+        case 'log': return <FileText size={16} />;
+        case 'research': return <Search size={16} />;
+        case 'chat': return <MessageCircle size={16} />;
+        default: return null;
+    }
+};
 import { settingsManager } from '@/lib/settings';
 import { useSync } from '@/hooks/useSync';
 import { useMeechi } from '@/hooks/useMeechi';
 import AddSourceModal from './components/AddSourceModal';
 import FileExplorer from './components/FileExplorer';
-import SourceViewer from './components/SourceViewer';
+import SourceEditor from './components/SourceEditor';
 
 import { ThemeSwitcher } from '@/components/ThemeSwitcher';
 
@@ -41,7 +54,14 @@ export default function Home() {
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
   const [returnToExplorer, setReturnToExplorer] = useState(false);
   const [isExplorerOpen, setIsExplorerOpen] = useState(false);
-  const [viewingSource, setViewingSource] = useState<{title: string, content: string} | null>(null);
+  
+  // Updated ViewingSource State
+  const [viewingSource, setViewingSource] = useState<{
+      path: string;
+      content: string;
+      tags?: string[];
+      metadata?: any;
+  } | null>(null);
   
   // Message Modal State
   const [messageModal, setMessageModal] = useState<{title: string, message: string} | null>(null);
@@ -175,20 +195,63 @@ export default function Home() {
 
   const handleOpenFile = async (path: string) => {
       try {
-          const content = await storage.readFile(path);
-          // Check if content is string (even empty string is valid)
-          if (typeof content === 'string') {
-              setViewingSource({ 
-                  title: path.split('/').pop() || path, 
-                  content 
-              });
-              setIsExplorerOpen(false); // Close Explorer if open
+          const file = await storage.getFile(path);
+          // getFile returns metadata (tags, etc) but usually not content
+          if (file) {
+               const content = await storage.readFile(path);
+               
+               if (typeof content === 'string') {
+                     setViewingSource({ 
+                         path: file.path, 
+                         content: content,
+                         tags: file.tags || [],
+                         metadata: file.metadata || {}
+                     });
+                     setIsExplorerOpen(false);
+               } else {
+                   showMessage("Error", "Binary content. Cannot open.");
+               }
           } else {
-              showMessage("Error", "Failed to read file content (empty or binary).");
+              // Fallback if getFile fails but readFile works? (Shouldn't happen if file exists)
+              const content = await storage.readFile(path);
+              if (typeof content === 'string') {
+                  setViewingSource({ path: path, content, tags: [], metadata: {} });
+                  setIsExplorerOpen(false);
+              } else {
+                  showMessage("Error", "Failed to read file.");
+              }
           }
       } catch (e) {
           console.error("Read Error", e);
           showMessage("Error", "Error reading file.");
+      }
+  };
+
+  const handleEditorSave = async (content: string, tags: string[], metadata: any) => {
+      if (!viewingSource) return;
+      
+      try {
+          await storage.saveFile(viewingSource.path, content, undefined, tags, metadata);
+          
+          // Update local view state
+          setViewingSource(prev => prev ? ({ ...prev, content, tags, metadata }) : null);
+          
+          showMessage("Saved", `Saved ${viewingSource.path}`);
+          syncNow(); // Trigger background sync
+      } catch (e) {
+          console.error("Save failed", e);
+          showMessage("Error", "Failed to save file.");
+      }
+  };
+
+  const handleUpdateMetadata = async (tags: string[], metadata: any) => {
+      if (!viewingSource) return;
+      try {
+          await storage.updateMetadata(viewingSource.path, { tags, metadata });
+          setViewingSource(prev => prev ? ({ ...prev, tags, metadata }) : null);
+          syncNow();
+      } catch (e) {
+          console.error("Metadata update failed", e);
       }
   };
 
@@ -231,14 +294,7 @@ export default function Home() {
       return timeStr;
   };
 
-  const getModeIcon = (mode?: string) => {
-      switch (mode?.toLowerCase()) {
-          case 'log': return '📝';
-          case 'research': return '🔍';
-          case 'chat': return '💬';
-          default: return '';
-      }
-  };
+
 
     // Helper: Parse Log with Mode and Date Context
   function parseLogToMessages(log: string, dateStr: string) {
@@ -586,7 +642,7 @@ export default function Home() {
                     }}
                     title="Settings"
                 >
-                    ⚙️
+                    <Settings size={22} />
                 </button>
              </Link>
              {/* Removed + Button */}
@@ -603,7 +659,8 @@ export default function Home() {
                 }}
                 title="File Explorer"
             >
-                📁
+
+                <FolderOpen size={24} />
             </button>
 
              {/* Model Indicator (Top Bar) */}
@@ -720,7 +777,7 @@ export default function Home() {
                             }}>
                                 <strong>{msg.role === 'michio' ? 'Meechi' : 'You'}</strong>
                                 <span style={{display: 'flex', alignItems: 'center', gap: '4px'}}>
-                                    {getModeIcon(msg.mode) && <span title={msg.mode}>{getModeIcon(msg.mode)}</span>}
+                                    {msg.mode && <span title={msg.mode}><ModeIcon mode={msg.mode} /></span>}
                                     {displayTime}
                                 </span>
                             </div>
@@ -730,7 +787,7 @@ export default function Home() {
                                     const raw = msg.content;
                                     // Clean generic placeholder
                                     if (raw.trim() === '...' || raw.trim() === '…') {
-                                        return <span style={{ animation: 'pulse 1.5s infinite', opacity: 0.7 }}>💡 Deep Thinking...</span>;
+                                        return <span style={{ animation: 'pulse 1.5s infinite', opacity: 0.7, display: 'flex', alignItems: 'center', gap: 6 }}><Lightbulb size={16} /> Deep Thinking...</span>;
                                     }
 
                                     const cleaned = raw.replace(/<function[\s\S]*?(?:<\/function>|$)/gi, '').trim();
@@ -738,7 +795,7 @@ export default function Home() {
                                     
                                     // Show "Using Tools" only if we have a function block BUT no human text yet
                                     if (isStartFunc && !cleaned) {
-                                        return <span style={{ animation: 'pulse 1.5s infinite', opacity: 0.7 }}>🛠️ Using Tools...</span>;
+                                        return <span style={{ animation: 'pulse 1.5s infinite', opacity: 0.7, display: 'flex', alignItems: 'center', gap: 6 }}><Hammer size={16} /> Using Tools...</span>;
                                     }
 
                                     return (
@@ -776,8 +833,8 @@ export default function Home() {
 
                 {meechi.localAIStatus && meechi.localAIStatus.includes("Crashed") && (
                     <div style={{ textAlign: 'center', margin: '1rem' }}>
-                        <div style={{ color: 'red', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-                            ⚠ GPU Driver Crashed
+                        <div style={{ color: '#ef4444', marginBottom: '0.5rem', fontSize: '0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                            <AlertTriangle size={18} /> GPU Driver Crashed
                         </div>
                         <button 
                             onClick={() => window.location.reload()}
@@ -785,10 +842,11 @@ export default function Home() {
                                 background: '#ef4444', color: 'white', border: 'none',
                                 padding: '0.5rem 1rem', borderRadius: 6,
                                 cursor: 'pointer', fontSize: '0.9rem',
-                                boxShadow: '0 2px 4px rgba(239, 68, 68, 0.2)'
+                                boxShadow: '0 2px 4px rgba(239, 68, 68, 0.2)',
+                                display: 'flex', alignItems: 'center', gap: 6
                             }}
                         >
-                            ⟳ Reload AI to Fix
+                            <LogOut size={16} /> Reload AI to Fix
                         </button>
                         <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', opacity: 0.8 }}>
                             Tip: If crashes persist, try the <b>1B Model</b> in Settings.
@@ -820,7 +878,7 @@ export default function Home() {
             }}
             title="Scroll to Bottom"
           >
-              ↓
+              <ArrowDown size={20} />
           </button>
       )}
 
@@ -902,9 +960,9 @@ export default function Home() {
                                     display: 'flex', alignItems: 'center', gap: 4
                                 }}
                             >
-                                {m === 'log' && '📝 Log'}
-                                {m === 'chat' && '💬 Chat'}
-                                {m === 'research' && '🔍 Research'}
+                                {m === 'log' && <><FileText size={14} /> Log</>}
+                                {m === 'chat' && <><MessageCircle size={14} /> Chat</>}
+                                {m === 'research' && <><Search size={14} /> Research</>}
                             </button>
                         ))}
                     </div>
@@ -962,11 +1020,11 @@ export default function Home() {
                         rows={1}
                         style={{ width: '100%' }}
                     />
-                    <button type="submit" disabled={isChatting} className={styles.sendBtn}>
+                    <button type="submit" disabled={isChatting} className={styles.sendBtn} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         {isChatting ? (
-                            <span style={{ fontSize: '1.2rem', animation: 'spin 1s linear infinite' }}>⟳</span>
+                            <Loader2 size={18} className={styles.spin} />
                         ) : (
-                            <span>↑</span>
+                            <ArrowUp size={20} />
                         )}
                     </button>
                     </div>
@@ -1005,17 +1063,23 @@ export default function Home() {
       )}
 
       {viewingSource && (
-        <SourceViewer 
-            title={viewingSource.title} 
-            content={viewingSource.content} 
-            onClose={() => {
-                setViewingSource(null);
-                if (returnToExplorer) {
-                    setIsExplorerOpen(true);
-                    setReturnToExplorer(false);
-                }
-            }} 
-        />
+          <SourceEditor 
+              file={{
+                  path: viewingSource.path,
+                  content: viewingSource.content,
+                  tags: viewingSource.tags,
+                  metadata: viewingSource.metadata
+              }}
+              onSave={handleEditorSave}
+              onUpdateMetadata={handleUpdateMetadata}
+              onClose={() => {
+                  setViewingSource(null);
+                  if (returnToExplorer) {
+                      setIsExplorerOpen(true);
+                      setReturnToExplorer(false);
+                  }
+              }} 
+          />
       )}
 
       {messageModal && (

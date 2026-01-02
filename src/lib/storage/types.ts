@@ -1,3 +1,16 @@
+export interface FileMetadata {
+    isSource?: boolean;
+    originalContent?: string;
+    summary?: string;
+    comments?: Array<{
+        id: string;
+        text: string;
+        range?: any; 
+        timestamp: number;
+    }>;
+    [key: string]: any;
+}
+
 export interface FileMeta {
     id: string; // The full path/key
     name: string;
@@ -6,6 +19,9 @@ export interface FileMeta {
     type: 'file' | 'folder' | 'source';
     remoteId?: string; // Google Drive ID (for robust sync)
     deleted?: number; // Soft delete flag (1 = deleted, 0 = active)
+    tags?: string[];
+    metadata?: FileMetadata;
+    content?: string | Blob | ArrayBuffer; // Optional content (available from some providers)
 }
 
 export interface StorageProvider {
@@ -17,7 +33,10 @@ export interface StorageProvider {
     /**
      * Write content to a file. Overwrites if exists.
      */
-    saveFile(virtualPath: string, content: string | Blob | ArrayBuffer, remoteId?: string): Promise<void>;
+    saveFile(virtualPath: string, content: string | Blob | ArrayBuffer, remoteId?: string, tags?: string[], metadata?: any): Promise<void>;
+
+    updateMetadata(virtualPath: string, updates: { tags?: string[], metadata?: any }): Promise<void>;
+    getFilesByTag(tag: string): Promise<FileMeta[]>;
 
     /**
      * Read content of a file. Returns null if not found.

@@ -1,6 +1,6 @@
-'use client';
 import { useState, useEffect } from 'react';
 import styles from './CalendarView.module.css';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 export default function CalendarView({ onClose }: { onClose: () => void }) {
   const [dates, setDates] = useState<string[]>([]); // ["2025-12-27", ...]
@@ -99,9 +99,9 @@ export default function CalendarView({ onClose }: { onClose: () => void }) {
       <div className={styles.content}>
         <div className={styles.calendarPanel}>
             <div className={styles.monthNav}>
-                <button onClick={() => changeMonth(-1)}>&lt;</button>
+                <button onClick={() => changeMonth(-1)} style={{background:'none', border:'none', cursor:'pointer'}}><ChevronLeft /></button>
                 <h3>{currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}</h3>
-                <button onClick={() => changeMonth(1)}>&gt;</button>
+                <button onClick={() => changeMonth(1)} style={{background:'none', border:'none', cursor:'pointer'}}><ChevronRight /></button>
             </div>
             <div className={styles.gridHeader}>
                 <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>

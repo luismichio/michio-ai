@@ -231,13 +231,16 @@ export class SyncEngine {
                         type: 'file',
                         updatedAt: Date.now(),
                         dirty: 1, // Mark as dirty so it syncs back up to Cloud!
-                        deleted: 0
+                        deleted: 0,
+                        tags: [],
+                        metadata: { isSource: true }
                     });
                     
                     // Trigger semantic indexing for the newly created source
                     this.storage.indexFile(sourcePath, sourceContent);
 
                     // Update the actual PDF record with BINARY content (Local-First)
+                    const existingPdf = await db.files.get(path);
                     await db.files.put({
                         path: path,
                         content: binary,
@@ -245,7 +248,9 @@ export class SyncEngine {
                         type: 'file',
                         remoteId: driveFile.id,
                         dirty: 0,
-                        deleted: 0
+                        deleted: 0,
+                        tags: existingPdf?.tags || [],
+                        metadata: existingPdf?.metadata || {}
                     });
 
                 } catch (e) {
@@ -304,18 +309,28 @@ export class SyncEngine {
                         });
                     }
                 }
+                // When "moving" via delete+create, we must rely on 'localFile' variable to carry over metadata
+                // But wait, the final DB put below handles the PRIMARY file. 
+                // This block handles CHILDREN.
+                
                 await db.files.delete(localFile.path);
             }
         }
 
         // 3. Update/Insert DB
+        // Preserve existing tags/metadata if updating
+        const existingRecord = await db.files.get(path);
+
         await db.files.put({
             path,
             remoteId: driveFile.id,
             type: isFolder ? 'folder' : 'file',
             content: finalContent,
             updatedAt: finalUpdatedAt,
-            dirty: finalDirty
+            dirty: finalDirty,
+            // Preserve existing metadata/tags unless we have a strategy to sync them (future)
+            tags: existingRecord?.tags || [],
+            metadata: existingRecord?.metadata || {}
         });
 
         // Trigger semantic indexing for incoming files

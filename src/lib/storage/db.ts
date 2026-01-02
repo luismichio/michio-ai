@@ -1,5 +1,18 @@
 import Dexie, { Table } from 'dexie';
 
+export interface FileMetadata {
+    isSource?: boolean;
+    originalContent?: string;
+    summary?: string;
+    comments?: Array<{
+        id: string;
+        text: string;
+        range?: any; 
+        timestamp: number;
+    }>;
+    [key: string]: any;
+}
+
 export interface FileRecord {
     path: string; // Primary Key
     content: string | Blob | ArrayBuffer;
@@ -8,6 +21,8 @@ export interface FileRecord {
     type: 'file' | 'folder' | 'source';
     dirty?: number; // 1 if dirty, 0 or undefined if clean (Indexed for fast lookup)
     deleted?: number; // 1 if deleted
+    tags?: string[]; // Array of tags (Indexed)
+    metadata?: FileMetadata; // JSON object for extra properties
 }
 
 export interface SettingRecord {
@@ -61,9 +76,19 @@ export class MeechiDB extends Dexie {
             chunks: '++id, filePath'
         });
 
-        // Add journal table in version 5
+    // Add journal table in version 5
         this.version(5).stores({
             journal: '++id, createdAt'
+        });
+
+        // Add tags and metadata table in version 6
+        this.version(6).stores({
+            files: 'path, remoteId, type, updatedAt, dirty, deleted, *tags'
+        }).upgrade(tx => {
+            return tx.table("files").toCollection().modify(file => {
+                file.tags = [];
+                file.metadata = {};
+            });
         });
     }
 }

@@ -5,6 +5,11 @@ import styles from '../page.module.css';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, FileRecord } from '@/lib/storage/db';
 import { extractTextFromPdf } from '@/lib/pdf';
+import { 
+  ArrowLeft, CheckSquare, Square, Trash2, 
+  RefreshCw, FolderPlus, Link, Upload, Clock, 
+  FileText, File as FileIcon, Folder, Book, MoreVertical, ChevronRight
+} from 'lucide-react';
 
 interface FileExplorerProps {
     storage: StorageProvider;
@@ -401,15 +406,49 @@ export default function FileExplorer(props: FileExplorerProps) {
         try {
             await storage.renameFile(oldPath, newPath);
         } catch (e: any) {
-             alert(e.message);
+             alert("Rename failed: " + e.message);
         }
     };
 
-    const handleReprocess = async (file: FileMeta) => {
-        // Allow re-process for 'source' (PDFs) AND standard files (to generate summary)
+    const handleToggleSourceStatus = async (file: FileMeta) => {
+        try {
+            if (file.type === 'source') {
+                // Convert to Note: Rename .source.md -> .md
+                const newPath = file.path.replace('.source.md', '.md');
+                await storage.renameFile(file.path, newPath);
+                // Also update metadata if needed (but rename usually preserves content, metadata update necessary for isSource)
+                const meta = file.metadata || {};
+                await storage.updateMetadata(newPath, { metadata: { ...meta, isSource: false } });
+                alert(`Converted "${file.name}" to Note.`);
+            } else {
+                // Convert to Source: Rename .md -> .source.md (or just update metadata + rename?)
+                // If user wants to "Make Source", we usually append .source.md to imply it's a source.
+                let newPath = file.path;
+                if (!newPath.endsWith('.source.md')) {
+                    if (newPath.endsWith('.md')) {
+                        newPath = newPath.replace(/\.md$/, '.source.md');
+                    } else {
+                        newPath = newPath + '.source.md'; // Fallback
+                    }
+                }
+                
+                await storage.renameFile(file.path, newPath);
+                const meta = file.metadata || {};
+                await storage.updateMetadata(newPath, { metadata: { ...meta, isSource: true } });
+                alert(`Converted "${file.name}" to Source.`);
+            }
+        } catch (e: any) {
+            console.error(e);
+            alert("Conversion failed: " + e.message);
+        }
+    };
+
+
+    const handleSummarise = async (file: FileMeta) => {
+        // Allow summarise for 'source' (PDFs) AND standard files
         if (file.type !== 'source' && file.type !== 'file') return;
         
-        if (!confirm(`Re-process ${file.name}? This will generate a new summary.${file.type==='source' ? ' If it is a PDF, text will be re-extracted.' : ''}`)) return;
+        if (!confirm(`Summarise ${file.name}? This will generate a new summary.${file.type==='source' ? ' If it is a PDF, text will be re-extracted.' : ''}`)) return;
 
         try {
             let contentToSummarize = "";
@@ -419,7 +458,6 @@ export default function FileExplorer(props: FileExplorerProps) {
                  let pdfContent: ArrayBuffer | undefined;
                  
                  // If it's a source file, the original is at path minus .source.md
-                 // If it's a raw PDF (exposed by bug or drag/drop), path is file.path
                  const originalPath = file.type === 'source' ? file.path.replace('.source.md', '') : file.path;
                  
                  const rawFile = await storage.readFile(originalPath);
@@ -429,7 +467,6 @@ export default function FileExplorer(props: FileExplorerProps) {
                  if (rawFile instanceof ArrayBuffer) {
                      pdfContent = rawFile;
                  } else if (typeof rawFile === 'string') {
-                     // Should not happen for PDF, but if it does, it's corrupted or actually text
                      throw new Error("Expected binary PDF, got text.");
                  }
 
@@ -441,19 +478,28 @@ export default function FileExplorer(props: FileExplorerProps) {
                  const displayName = file.type === 'source' ? file.name.replace(' (Source)', '') : file.name;
                  contentToSummarize = `## Source: ${displayName}\n\n${contentToSummarize}`; 
             } else {
-                 // Standard File Logic
-                 const raw = await storage.readFile(file.path);
-                 if (typeof raw !== 'string') {
-                     // If it's binary but not PDF/source managed?
-                     throw new Error("File content is binary/image. Cannot reprocess as text.");
-                 }
-                 // Simplify: If it already has a summary block, strip it first?
-                 // Heuristic: If starts with "> **Summary**:", remove up to "---"
-                 contentToSummarize = raw;
-                 if (raw.trim().startsWith('> **Summary**:')) {
-                     const parts = raw.split('\n\n---\n\n');
-                     if (parts.length > 1) {
-                         contentToSummarize = parts.slice(1).join('\n\n---\n\n');
+                 // Standard File - Use Original if available?
+                 // Ideally we want to summarise the CURRENT content or ORIGINAL?
+                 // "Reset" option implies we might want original.
+                 // "Summarise" implies we summarise what we have or what works best.
+                 // If we have "originalContent" in metadata, that would be ideal for a clean summary.
+                 // But for now, let's grab the file content.
+                 
+                 // If metadata exists and has 'originalContent', maybe prefer that? 
+                 // But getting metadata here requires `storage.getFile` which we have in `file` (passed in).
+                 
+                 const fullFile = await storage.getFile(file.path);
+                 if (fullFile?.metadata?.originalContent) {
+                     contentToSummarize = fullFile.metadata.originalContent;
+                 } else {
+                     const raw = await storage.readFile(file.path);
+                     if (typeof raw !== 'string') throw new Error("File content is binary. Cannot summarise.");
+                     
+                     // Strip existing summary if present
+                     contentToSummarize = raw;
+                     if (raw.trim().startsWith('> **Summary**:')) {
+                         const parts = raw.split('\n\n---\n\n');
+                         if (parts.length > 1) contentToSummarize = parts.slice(1).join('\n\n---\n\n');
                      }
                  }
             }
@@ -471,22 +517,23 @@ export default function FileExplorer(props: FileExplorerProps) {
                 finalContent = `> **Summary**: ${data.summary}\n\n---\n\n${contentToSummarize}`;
             }
 
-            // Fix: Ensure we save to the .source.md path if it was a raw PDF
+            // Target Path
             let targetPath = file.path;
             if (file.name.endsWith('.pdf') && !file.path.endsWith('.source.md')) {
+                // If we are summarising a raw PDF (that wasn't a source yet?), make it a source
                 targetPath = `${file.path}.source.md`;
             }
 
-            await storage.saveFile(targetPath, finalContent);
+            // Save with Metadata update if needed?
+            // If it was a generic file, we might mark it as having a summary.
+            // Ensure we don't lose existing metadata.
+            const existing = await storage.getFile(targetPath);
+            await storage.saveFile(targetPath, finalContent, undefined, existing?.tags, existing?.metadata);
             
-            // Force Indexing? (Assuming saveFile triggers it via API, but let's be sure)
-            // If the user's "lawofux" wasn't found, maybe it's because it was just saved?
-            // IndexedDB update happens automatically via LiveQuery.
-            
-            showAlert("Success", "Re-processing complete!");
+            showAlert("Success", "Summarised successfully!");
 
         } catch (e: any) {
-             console.error("Reprocess failed", e);
+             console.error("Summarise failed", e);
              showAlert("Error", "Failed: " + e.message);
         }
     };
@@ -683,16 +730,20 @@ export default function FileExplorer(props: FileExplorerProps) {
                 </div>
 
                 {/* Toolbar ... (unchanged) */}
-                <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', paddingBottom: '1rem', borderBottom: '1px solid #eee' }}>
-                    <button onClick={handleBack} disabled={currentPath === 'misc'} style={{ cursor: 'pointer', visibility: currentPath === 'misc' ? 'hidden' : 'visible' }}>
-                        ⬅ Back
+                <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', paddingBottom: '1rem', borderBottom: '1px solid #eee', alignItems: 'center' }}>
+                    <button onClick={handleBack} disabled={currentPath === 'misc'} style={{  
+                        cursor: currentPath === 'misc' ? 'default' : 'pointer', 
+                        opacity: currentPath === 'misc' ? 0 : 1,
+                        background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: 4
+                    }}>
+                        <ArrowLeft size={18} /> Back
                     </button>
                     
                     <button onClick={() => {
                         setIsBulkMode(!isBulkMode);
                         if (isBulkMode) setSelectedIds(new Set()); 
-                    }} style={{ cursor: 'pointer', background: isBulkMode ? '#e6f7ff' : 'transparent', border: '1px solid #ccc', borderRadius: 4, padding: '2px 8px' }}>
-                        {isBulkMode ? 'Done' : 'Select'}
+                    }} style={{ cursor: 'pointer', background: isBulkMode ? '#e6f7ff' : 'transparent', border: '1px solid #ccc', borderRadius: 4, padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {isBulkMode ? <CheckSquare size={16} /> : <Square size={16} />} Select
                     </button>
 
                     {isBulkMode && (
@@ -702,8 +753,8 @@ export default function FileExplorer(props: FileExplorerProps) {
                     )}
 
                     {isBulkMode && selectedIds.size > 0 && (
-                        <button onClick={handleBulkDelete} style={{ color: 'red', cursor: 'pointer' }}>
-                            Delete Selected ({selectedIds.size})
+                        <button onClick={handleBulkDelete} style={{ color: '#ef4444', cursor: 'pointer', background: 'none', border:'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <Trash2 size={16} /> Delete ({selectedIds.size})
                         </button>
                     )}
 
@@ -713,7 +764,7 @@ export default function FileExplorer(props: FileExplorerProps) {
                             await storage.resetSyncState();
                             alert("Sync Reset. Please Sign Out and Sign In again to refresh permissions.");
                         }
-                    }} style={{ cursor: 'pointer', marginRight: '1rem', color: '#ff4444', border: '1px solid #ff4444', background: 'transparent', borderRadius: 4, padding: '2px 8px' }}>
+                    }} style={{ cursor: 'pointer', marginRight: '1rem', color: '#ef4444', border: '1px solid #ef4444', background: 'transparent', borderRadius: 4, padding: '4px 8px', fontSize: '0.8rem' }}>
                         Reset Cloud
                     </button>
                     {props.syncLogs && (
@@ -725,18 +776,18 @@ export default function FileExplorer(props: FileExplorerProps) {
                             } else {
                                 showAlert("Sync", "Sync not available");
                             }
-                        }} style={{ cursor: 'pointer', marginRight: '1rem', color: '#0070f3', border: '1px solid #0070f3', background: 'transparent', borderRadius: 4, padding: '2px 8px' }}>
-                            ⟳ Sync Now
+                        }} style={{ cursor: 'pointer', marginRight: '1rem', color: '#3b82f6', border: '1px solid #3b82f6', background: 'transparent', borderRadius: 4, padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <RefreshCw size={14} /> Sync Now
                         </button>
                     )}
-                    <button onClick={handleCreateFolder} style={{ cursor: 'pointer' }}>
-                        New Topic
+                    <button onClick={handleCreateFolder} style={{ cursor: 'pointer', background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <FolderPlus size={18} /> New Topic
                     </button>
-                    <button onClick={() => setIsLinkDialogOpen(true)} style={{ cursor: 'pointer' }}>
-                        Add Link
+                    <button onClick={() => setIsLinkDialogOpen(true)} style={{ cursor: 'pointer', background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Link size={18} /> Add Link
                     </button>
-                    <button onClick={() => fileInputRef.current?.click()} style={{ cursor: 'pointer' }}>
-                        Upload Logic
+                    <button onClick={() => fileInputRef.current?.click()} style={{ cursor: 'pointer', background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Upload size={18} /> Upload Logic
                     </button>
                     <input type="file" ref={fileInputRef} onChange={handleUpload} style={{ display: 'none' }} />
                 </div>
@@ -763,7 +814,7 @@ export default function FileExplorer(props: FileExplorerProps) {
                                 >
                                     {part === 'misc' ? 'Home' : part}
                                 </span>
-                                {!isLast && <span>&gt;</span>}
+                                {!isLast && <ChevronRight size={14} style={{ color: '#999' }} />}
                             </React.Fragment>
                          );
                      })}
@@ -886,8 +937,8 @@ export default function FileExplorer(props: FileExplorerProps) {
                                 )}
                                 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1 }}>
-                                    <span style={{ fontSize: '1.5rem' }}>
-                                        {item.type === 'folder' ? '📁' : (item.type === 'source' ? '📚' : '📄')}
+                                    <span style={{ color: '#666', display: 'flex', alignItems: 'center' }}>
+                                        {item.type === 'folder' ? <Folder size={20} fill="currentColor" fillOpacity={0.2} /> : (item.type === 'source' ? <Book size={20} /> : <FileText size={20} />)}
                                     </span>
                                     <span style={{ fontWeight: item.type === 'folder' ? 600 : 400 }}>{item.name}</span>
                                 </div>
@@ -899,7 +950,7 @@ export default function FileExplorer(props: FileExplorerProps) {
                                     className={`${styles.kebabButton} ${activeMenuId === item.id ? styles.active : ''}`}
                                     onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === item.id ? null : item.id); }}
                                 >
-                                    ⋮
+                                    <MoreVertical size={16} />
                                 </button>
                                 
                                 {activeMenuId === item.id && (
@@ -908,9 +959,19 @@ export default function FileExplorer(props: FileExplorerProps) {
                                             Rename
                                         </button>
                                         
-                                        <button className={styles.dropdownItem} onClick={() => { setActiveMenuId(null); handleReprocess(item); }}>
-                                            Re-Process
+                                        <button className={styles.dropdownItem} onClick={() => { setActiveMenuId(null); handleSummarise(item); }}>
+                                            Summarise
                                         </button>
+
+                                        {item.type === 'source' ? (
+                                            <button className={styles.dropdownItem} onClick={() => { setActiveMenuId(null); handleToggleSourceStatus(item); }}>
+                                                Convert to Note
+                                            </button>
+                                        ) : (
+                                            <button className={styles.dropdownItem} onClick={() => { setActiveMenuId(null); handleToggleSourceStatus(item); }}>
+                                                Make Source
+                                            </button>
+                                        )}
 
                                         <button className={`${styles.dropdownItem} ${styles.delete}`} onClick={() => { setActiveMenuId(null); handleDeleteClick(item); }}>
                                             Delete
