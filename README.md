@@ -11,7 +11,7 @@
 
 ### 1. The Digital Sanctuary
 Your thoughts are the most private thing you own. In an era where every keystroke is "mined" for training data, Meechi stands as a sanctuary. We believe that your self-reflection shouldn't be a product for a cloud provider; privacy is not a setting, it is our architecture.
-- **Zero-Cloud Intelligence**: Your "Sage" (AI) lives in your browser, not a server farm.
+- **Sovereign Intelligence**: Your "Sage" (AI) runs on your terms—keep it entirely in your browser, on your local machine, or use the cloud.
 - **Data Sovereignty**: You own the keys, the memory, and the path.
 
 ### 2. Presence Over Achievement
@@ -101,17 +101,16 @@ Meechi is built with the latest web technologies to ensure speed, privacy, and r
 
 ## 📜 Development Changelog
 
-### v0.9.98 - The Writer's Studio (Jan 2026)
-*   **Notion-Like Editor**: A complete overhaul of the writing experience.
-    *   **Slash Commands**: Type `/` to instantly insert Headings, Lists, Quotes, Code Blocks, and Dividers.
-    *   **Floating Toolbar**: Select text to access a context-aware menu for Formatting, Colors, and Comments. (Fixed "Add Comment" visibility regression).
-    *   **Restricted Link Editing**: "Add Link" button is now correctly restricted to Edit Mode only.
-    *   **Comment System**: Inline, annotated comments with a dedicated sidebar UI.
-    *   **Smart Typography**: Styled Headings (H1-H3), Blockquotes, and Code blocks with JetBrains Mono.
-*   **Visual Polish**:
-    *   **Iconography Audit**: Standardized the entire application to use `lucide-react` icons (20+ icons replaced).
-    *   **UI Consistency**: Unified styles for Buttons, Modals, and Menus to match the "Paper & Sage" aesthetic.
-    *   **Clearer Navigation**: Distinct icons for Chat (`MessageCircle`) vs Comments (`MessageSquareText`).
+### v0.9.99 - The Desktop Era (Jan 2026)
+*   **Meechi Desktop**: First official desktop release (Windows MSI / macOS DMG).
+    *   **Bundled App**: Runs locally with no browser required.
+    *   **System Tray**: Quick access to your companion.
+    *   **Local Proxy**: Acts as a "Local Cloud" server to sync data with other browsers on your network.
+*   **Settings Redesign**: A completely overhauled, Google-style settings interface.
+    *   **Sidebar Navigation**: Persistent access to Profile, Appearance, AI, and Storage.
+    *   **Appearance Customization**: Real-time color pickers (Accent, Background, Surface) and Font controls.
+    *   **AI Management**: Drag-and-drop provider ordering and simplified model selection.
+*   **Browser Sync**: Sync your "Ship's Log" across Chrome, Safari, and Desktop using the file system as the bridge.
 
 > [!NOTE]  
 > See [CHANGELOG.md](./CHANGELOG.md) for full version history.

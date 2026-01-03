@@ -66,23 +66,19 @@ export function ThemeProvider({ children, ...props }: ThemeProviderProps) {
 
       // Accent Color (OKLCH Engine)
       if (appearance.accentColor) {
-           // 1. Convert Hex to OKLCH
            const { l, c, h, cssValue } = getOklch(appearance.accentColor);
-           
-           // 2. Set Main Accent
            root.style.setProperty('--accent', cssValue);
-           
-           // 3. Set Component Vars (for Tailwind opacity if needed: oklch(l c h / alpha))
-           root.style.setProperty('--accent-l', l);
-           root.style.setProperty('--accent-c', c);
-           root.style.setProperty('--accent-h', h);
-
-           // 4. Generate Destructive (Stop Button)
-           // Logic: Same Lightness, Same Chroma, but Red Hue (approx 29 in OKLCH is standard red)
-           // Actually, standard red is ~20-30. 
-           // Let's use h=25 (Warm Red)
+           root.style.setProperty('--accent-l', String(l));
+           root.style.setProperty('--accent-c', String(c));
+           root.style.setProperty('--accent-h', String(h));
            root.style.setProperty('--destructive', `oklch(${l} ${c} 25)`);
       }
+
+      // Backgrounds & Surfaces
+      if (appearance.backgroundColor) root.style.setProperty('--background', appearance.backgroundColor);
+      if (appearance.surfaceColor) root.style.setProperty('--surface', appearance.surfaceColor);
+      if (appearance.foregroundColor) root.style.setProperty('--foreground', appearance.foregroundColor);
+      if (appearance.secondaryColor) root.style.setProperty('--secondary', appearance.secondaryColor);
 
       // Radius
       if (appearance.radius) {

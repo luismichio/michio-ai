@@ -23,6 +23,10 @@ export interface LocalAIConfig {
 export interface AppearanceConfig {
     fontFamily: string; // e.g. "Inter", "Lora", "Mono", or custom URL
     accentColor: string; // Hex
+    backgroundColor?: string;
+    surfaceColor?: string;
+    foregroundColor?: string;
+    secondaryColor?: string;
     radius: string; // Tailwind/CSS value e.g. "0.5rem"
     iconLibrary: 'lucide' | 'material' | 'custom';
 }
@@ -34,6 +38,10 @@ export interface AppConfig {
     localAI: LocalAIConfig;
     theme: 'light' | 'dark' | 'system';
     appearance: AppearanceConfig;
+    desktop: {
+        useBundledOllama: boolean;
+        ollamaUrl: string; // Default http://localhost:11434
+    };
 }
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -54,10 +62,18 @@ const DEFAULT_CONFIG: AppConfig = {
         enabled: true,
         model: 'Llama-3.2-1B-Instruct-q4f16_1-MLC' // Default to 1B (Stable)
     },
+    desktop: {
+        useBundledOllama: true,
+        ollamaUrl: "http://localhost:11434"
+    },
     theme: 'system',
     appearance: {
         fontFamily: 'Lora',
         accentColor: '#6B8E6B', // Sage
+        backgroundColor: '#F9F7F2',
+        surfaceColor: '#FFFFFF',
+        foregroundColor: '#1A1C1A',
+        secondaryColor: '#5C635C',
         radius: '0.5rem',
         iconLibrary: 'lucide'
     }

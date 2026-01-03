@@ -2,6 +2,18 @@
 ## Changelog
 
 
+
+### v0.9.99 - The Desktop Era (Jan 2026)
+*   **Meechi Desktop**: First official desktop release (Windows MSI / macOS DMG).
+    *   **Bundled App**: Runs locally with no browser required.
+    *   **System Tray**: Quick access to your companion.
+    *   **Local Proxy**: Acts as a "Local Cloud" server to sync data with other browsers on your network.
+*   **Settings Redesign**: A completely overhauled, Google-style settings interface.
+    *   **Sidebar Navigation**: Persistent access to Profile, Appearance, AI, and Storage.
+    *   **Appearance Customization**: Real-time color pickers (Accent, Background, Surface) and Font controls.
+    *   **AI Management**: Drag-and-drop provider ordering and simplified model selection.
+*   **Browser Sync**: Sync your "Ship's Log" across Chrome, Safari, and Desktop using the file system as the bridge.
+
 ### v1.1.0 - The Color & Personality Update (Jan 2026)
 *   **Theme Harmonization (OKLCH Engine)**:
     *   **True Color Science**: Implemented a mathematical color engine (`src/lib/colors.ts`) that converts user Hex input to the OKLCH color space for superior perceptual uniformity.

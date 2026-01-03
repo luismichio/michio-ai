@@ -1,512 +1,130 @@
 'use client';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useSession, signIn, signOut } from "next-auth/react";
-import { settingsManager, AppConfig, AIProviderConfig } from '@/lib/settings';
+import { useSession } from "next-auth/react";
+import { settingsManager, AppConfig } from '@/lib/settings';
 import { LocalStorageProvider } from '@/lib/storage/local';
-import { AVAILABLE_MODELS } from '@/lib/ai/registry';
+import { isTauri, checkLocalOllama, checkOllamaInstalled } from '@/lib/platform';
+import { nativeSync } from '@/lib/storage/native-sync';
+
+// Components
+import { SettingsSidebar } from './components/SettingsSidebar';
+import { ProfileSettings } from './components/ProfileSettings';
+import { AppearanceSettings } from './components/AppearanceSettings';
+import { AISettings } from './components/AISettings';
+import { StorageSettings } from './components/StorageSettings';
 
 export default function SettingsPage() {
     const { data: session } = useSession();
     const [config, setConfig] = useState<AppConfig | null>(null);
     const [loading, setLoading] = useState(true);
-    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-    const [gpuSupported, setGpuSupported] = useState<boolean | null>(null);
+    const [activeTab, setActiveTab] = useState('profile');
+    
+    // Desktop State
+    const [ollamaConnected, setOllamaConnected] = useState(false);
+    const [ollamaInstalled, setOllamaInstalled] = useState<boolean | null>(null);
+    const [syncPath, setSyncPath] = useState<string | null>(null);
 
-    // Ensure storage is ready
+    // Initial Load
+    // Use state lazy init to avoid multiple checks
     const [storage] = useState(() => new LocalStorageProvider());
 
-
     useEffect(() => {
+        let mounted = true;
         async function load() {
             await storage.init();
             const cfg = await settingsManager.getConfig();
-            setConfig(cfg);
-            setLoading(false);
             
-            // Check WebGPU
-            if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
-                setGpuSupported(true);
-            } else {
-                setGpuSupported(false);
+            if (!mounted) return;
+            setConfig(cfg);
+
+            // Desktop Checks
+            if (isTauri()) {
+                const connected = await checkLocalOllama();
+                if (mounted) setOllamaConnected(connected);
+                if (!connected) {
+                    const installed = await checkOllamaInstalled();
+                    if (mounted) setOllamaInstalled(installed);
+                } else {
+                    if (mounted) setOllamaInstalled(true);
+                }
             }
+
+            // Sync Path
+            const path = await nativeSync.getSyncPath();
+            if (mounted) setSyncPath(path);
+            
+            if (mounted) setLoading(false);
         }
         load();
+        return () => { mounted = false; };
     }, [storage]);
 
-    const handleSave = async () => {
+    const handleUpdate = async (updates: Partial<AppConfig>) => {
         if (!config) return;
-        setSaveStatus('saving');
-        try {
-            await settingsManager.saveConfig(config);
-            // Dispatch event for ThemeProvider
-            window.dispatchEvent(new Event('meechi-appearance-update'));
-            setSaveStatus('saved');
-            setTimeout(() => setSaveStatus('idle'), 2000);
-        } catch (e) {
-            console.error(e);
-            setSaveStatus('error');
-        }
+        const newConfig = { ...config, ...updates };
+        setConfig(newConfig);
+        await settingsManager.saveConfig(newConfig);
     };
 
-    const updateIdentity = (field: keyof AppConfig['identity'], value: string) => {
-        if (!config) return;
-        setConfig({
-            ...config,
-            identity: { ...config.identity, [field]: value }
-        });
-    };
-
-    const updateProvider = (id: string, updates: Partial<AIProviderConfig>) => {
-        if (!config) return;
-        setConfig({
-            ...config,
-            providers: config.providers.map(p => p.id === id ? { ...p, ...updates } : p)
-        });
-    };
-
-    const updateLocalAI = (updates: Partial<{ enabled: boolean; model: string }>) => {
-        if (!config) return;
-        setConfig({
-            ...config,
-            localAI: { ...config.localAI, ...updates }
-        });
-    };
-
-    if (loading) return <div style={{ padding: '2rem' }}>Loading settings...</div>;
-    if (!config) return <div style={{ padding: '2rem' }}>Failed to load settings.</div>;
-
-    const groqProvider = config.providers.find(p => p.id === 'groq');
-    const geminiProvider = config.providers.find(p => p.id === 'gemini');
+    if (loading || !config) {
+        return (
+            <div style={{ padding: '2rem', display: 'flex', justifyContent: 'center', height: '100vh', alignItems: 'center' }}>
+                <span style={{ color: 'var(--secondary)' }}>Loading settings...</span>
+            </div>
+        );
+    }
 
     return (
-        <div style={{ maxWidth: 800, margin: '0 auto', padding: '2rem', fontFamily: 'sans-serif' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
-                <h1 style={{ margin: 0 }}>Settings</h1>
-                <Link href="/app" style={{ textDecoration: 'none', color: '#666', fontSize: '0.9rem' }}>← Back to Chat</Link>
-            </div>
+        <div style={{ display: 'flex', height: '100vh', width: '100%', background: 'var(--background)', overflow: 'hidden' }}>
+             {/* Left Sidebar */}
+             <SettingsSidebar activeTab={activeTab} onTabChange={setActiveTab} />
 
-            <section style={sectionStyle}>
-                <h2 style={headerStyle}>Appearance</h2>
-                
-                {/* Font Family */}
-                <div style={fieldGroupStyle}>
-                    <label style={labelStyle}>Font Family</label>
-                    <select 
-                        style={inputStyle} 
-                        value={config.appearance?.fontFamily || 'Inter'}
-                        onChange={e => setConfig({ 
-                            ...config, 
-                            appearance: { ...config.appearance, fontFamily: e.target.value } 
-                        })}
-                    >
-                        <option value="Inter">Inter (Clean)</option>
-                        <option value="Lora">Lora (Serif)</option>
-                        <option value="Mono">Monospace (Code)</option>
-                    </select>
-                </div>
-
-                {/* Accent Color */}
-                <div style={fieldGroupStyle}>
-                    <label style={labelStyle}>Accent Color</label>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                         <input 
-                            type="color" 
-                            value={config.appearance?.accentColor || '#6B8E6B'} 
-                            onChange={e => setConfig({ 
-                                ...config, 
-                                appearance: { ...config.appearance, accentColor: e.target.value } 
-                            })}
-                            style={{ width: 40, height: 40, padding: 0, border: 'none', background: 'none' }}
-                         />
-                         <input 
-                            style={{ ...inputStyle, width: 100 }}
-                            value={config.appearance?.accentColor || '#6B8E6B'}
-                            onChange={e => setConfig({ 
-                                ...config, 
-                                appearance: { ...config.appearance, accentColor: e.target.value } 
-                            })} 
-                         />
-                    </div>
-                </div>
-
-                {/* Icon Library */}
-                 <div style={fieldGroupStyle}>
-                    <label style={labelStyle}>Icon Library</label>
-                    <select 
-                        style={inputStyle} 
-                        value={config.appearance?.iconLibrary || 'lucide'}
-                        onChange={e => setConfig({ 
-                            ...config, 
-                            appearance: { ...config.appearance, iconLibrary: e.target.value as any } 
-                        })}
-                    >
-                        <option value="lucide">Lucide (Default)</option>
-                        <option value="material">Material Design (Coming Soon)</option>
-                        <option value="custom">Custom (Coming Soon)</option>
-                    </select>
-                </div>
-
-                {/* Radius */}
-                <div style={fieldGroupStyle}>
-                    <label style={labelStyle}>Corner Radius</label>
-                    <select 
-                        style={inputStyle} 
-                        value={config.appearance?.radius || '0.5rem'}
-                        onChange={e => setConfig({ 
-                            ...config, 
-                            appearance: { ...config.appearance, radius: e.target.value } 
-                        })}
-                    >
-                        <option value="0rem">Sharp (0px)</option>
-                        <option value="0.25rem">Small (4px)</option>
-                        <option value="0.5rem">Medium (8px)</option>
-                        <option value="1rem">Large (16px)</option>
-                        <option value="9999px">Round</option>
-                    </select>
-                </div>
-
-            </section>
-
-            <section style={sectionStyle}>
-                <h2 style={headerStyle}>Identity</h2>
-                <div style={fieldGroupStyle}>
-                    <label style={labelStyle}>Your Name</label>
-                    <input 
-                        style={inputStyle} 
-                        value={config.identity.name}
-                        onChange={e => updateIdentity('name', e.target.value)}
-                        placeholder="e.g. Traveler"
-                    />
-                </div>
-                <div style={fieldGroupStyle}>
-                    <label style={labelStyle}>AI Tone</label>
-                    <textarea 
-                        style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} 
-                        value={config.identity.tone}
-                        onChange={e => updateIdentity('tone', e.target.value)}
-                        placeholder="Describe how Meechi should speak..."
-                    />
-                </div>
-            </section>
-
-            <section style={sectionStyle}>
-                <h2 style={headerStyle}>MCP Marketplace (AI Providers)</h2>
-                
-                {/* Groq Card */}
-                <div style={cardStyle}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                        <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-                            Groq (Meta Llama 3)
-                            {config.activeProviderId === 'groq' && groqProvider?.apiKey && <span style={badgeStyle}>Active</span>}
-                        </h3>
-                        <label className="switch" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem' }}>
-                             Enabled
-                             <input 
-                                type="checkbox" 
-                                checked={groqProvider?.enabled} 
-                                onChange={e => groqProvider && updateProvider('groq', { enabled: e.target.checked })}
-                             />
-                        </label>
-                    </div>
-
-                    <div style={fieldGroupStyle}>
-                        <label style={labelStyle}>API Key</label>
-                        <input 
-                            type="password"
-                            style={inputStyle} 
-                            value={groqProvider?.apiKey || ''}
-                            onChange={e => groqProvider && updateProvider('groq', { apiKey: e.target.value })}
-                            placeholder="gsk_..."
-                        />
-                        <p style={{ fontSize: '0.8rem', color: '#666', marginTop: 4 }}>
-                            Leave empty to use system default (if hosted). Required for personal usage.
-                        </p>
-                        <div style={{ marginTop: 4, textAlign: 'right' }}>
-                             <a 
-                                href="https://console.groq.com/keys" 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                style={{ fontSize: '0.8rem', color: '#3b82f6', textDecoration: 'none' }}
-                            >
-                                Get API Key →
-                            </a>
-                        </div>
-                    </div>
-
-                    <div style={fieldGroupStyle}>
-                        <label style={labelStyle}>Model</label>
-                        <select 
-                            style={inputStyle} 
-                            value={groqProvider?.model || 'llama-3.3-70b-versatile'}
-                            onChange={e => groqProvider && updateProvider('groq', { model: e.target.value })}
-                        >
-                            <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
-                            <option value="llama3-70b-8192">llama3-70b-8192</option>
-                            <option value="mixtral-8x7b-32768">mixtral-8x7b-32768</option>
-                        </select>
-                    </div>
-                </div>
-
-                {/* Gemini Card */}
-                <div style={cardStyle}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                        <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-                            Google Gemini
-                            {config.activeProviderId === 'gemini' && geminiProvider?.apiKey && <span style={badgeStyle}>Active</span>}
-                        </h3>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                             <button
-                                onClick={() => config && setConfig({ ...config, activeProviderId: 'gemini' })}
-                                disabled={config.activeProviderId === 'gemini'}
-                                style={{
-                                    fontSize: '0.8rem', padding: '2px 8px', cursor: 'pointer',
-                                    background: config.activeProviderId === 'gemini' ? '#eee' : 'transparent',
-                                    border: '1px solid #ddd', borderRadius: 4
-                                }}
-                             >
-                                 Make Active
-                             </button>
-                             <label className="switch" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem' }}>
-                                  Enabled
-                                  <input 
-                                     type="checkbox" 
-                                     checked={geminiProvider?.enabled ?? true} 
-                                     onChange={e => geminiProvider ? updateProvider('gemini', { enabled: e.target.checked }) : 
-                                        setConfig(c => c ? ({ ...c, providers: [...c.providers, { id: 'gemini', name: 'Google Gemini', enabled: true }] }) : null)
-                                     }
-                                  />
-                             </label>
-                        </div>
-                    </div>
-
-                    <div style={fieldGroupStyle}>
-                        <label style={labelStyle}>API Key</label>
-                        <input 
-                            type="password"
-                            style={inputStyle} 
-                            value={geminiProvider?.apiKey || ''}
-                            onChange={e => {
-                                if (geminiProvider) {
-                                    updateProvider('gemini', { apiKey: e.target.value });
-                                } else {
-                                    // Initialize if missing
-                                    setConfig(c => c ? ({ ...c, providers: [...c.providers, { id: 'gemini', name: 'Google Gemini', enabled: true, apiKey: e.target.value }] }) : null);
-                                }
-                            }}
-                            placeholder="AIz..."
-                        />
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-                            <p style={{ fontSize: '0.8rem', color: '#666', margin: 0 }}>
-                                Leave empty to use system fallback.
-                            </p>
-                            <a 
-                                href="https://aistudio.google.com/app/apikey" 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                style={{ fontSize: '0.8rem', color: '#3b82f6', textDecoration: 'none' }}
-                            >
-                                Get API Key →
-                            </a>
-                        </div>
-                    </div>
-                </div>
-
-            </section>
-
-            <section style={sectionStyle}>
-                <h2 style={headerStyle}>Local AI (Fallback)</h2>
-                <div style={cardStyle}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                        <div>
-                             <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                WebLLM (In-Browser)
-                            </h3>
-                            <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', color: '#666' }}>
-                                Runs locally on your GPU when cloud providers fail.
-                                <br />
-                                <strong>Note:</strong> Requires ~4GB download on first use.
-                            </p>
-                        </div>
-                       
-                        <label className="switch" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem' }}>
-                             Enabled
-                             <input 
-                                type="checkbox" 
-                                checked={config.localAI?.enabled ?? true} 
-                                onChange={e => updateLocalAI({ enabled: e.target.checked })}
-                                disabled={gpuSupported === false}
-                             />
-                        </label>
-                    </div>
-
-                    {gpuSupported === false && (
-                        <div style={{ background: '#fef2f2', color: '#991b1b', padding: '0.75rem', borderRadius: 6, marginBottom: '1rem', fontSize: '0.85rem', display: 'flex', gap: 8 }}>
-                            <span>⚠️</span>
-                            <div>
-                                <strong>WebGPU Not Supported</strong><br/>
-                                Your browser or device does not support WebGPU, which is required for running Local AI. Please switch to a compatible browser (e.g., Chrome 113+, Edge 113+).
-                            </div>
-                        </div>
+             {/* Right Content */}
+             <main style={{ flex: 1, padding: '2rem 3rem', overflowY: 'auto' }}>
+                 <div style={{ maxWidth: '800px', margin: '0 auto' }}>
+                    
+                    {/* Render Active Section */}
+                    {activeTab === 'profile' && (
+                        <ProfileSettings config={config} updateConfig={handleUpdate} />
                     )}
-
-                    {gpuSupported === true && (
-                        <div style={{ marginBottom: '1rem' }}>
-                            <span style={{ fontSize: '0.8rem', background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: 4 }}>
-                                ✅ Device Compatible (WebGPU Detected)
-                            </span>
-                        </div>
+                    
+                    {activeTab === 'appearance' && (
+                        <AppearanceSettings config={config} updateConfig={handleUpdate} />
                     )}
+                    
+                    {activeTab === 'ai' && (
+                        <AISettings 
+                            config={config} 
+                            updateConfig={handleUpdate}
+                            ollamaConnected={ollamaConnected}
+                            ollamaInstalled={ollamaInstalled}
+                        />
+                    )}
+                    
+                    {activeTab === 'storage' && (
+                        <StorageSettings 
+                            config={config} 
+                            syncPath={syncPath}
+                            setSyncPath={setSyncPath}
+                        />
+                    )}
+                 </div>
+             </main>
 
-                    <div style={fieldGroupStyle}>
-                        <label style={labelStyle}>Model</label>
-                        <select 
-                            style={inputStyle} 
-                            value={config.localAI?.model || 'Auto'}
-                            onChange={e => updateLocalAI({ model: e.target.value })}
-                        >
-                            <option value="Auto">Auto (Default: 1B)</option>
-                            {AVAILABLE_MODELS.map(m => (
-                                <option key={m.id} value={m.id}>
-                                    {m.name} ({Math.round(m.vram_required_mb / 1024)}GB VRAM)
-                                </option>
-                            ))}
-                        </select>
-                         <p style={{ fontSize: '0.8rem', color: '#666', marginTop: 4 }}>
-                            Select 'Llama 3.2 1B' for maximum speed and stability.
-                        </p>
-                    </div>
-                </div>
-            </section>
-
-            <section style={sectionStyle}>
-                <h2 style={headerStyle}>Storage Integration (MCP)</h2>
-                
-                {/* Google Drive Card */}
-                <div style={cardStyle}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                            <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                Google Drive
-                                {session && <span style={badgeStyle}>Connected</span>}
-                            </h3>
-                            <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', color: '#666' }}>
-                                Treated as an MCP Resource. Accessed only when you explicitly ask Meechi.
-                            </p>
-                        </div>
-                        
-                        <div>
-                            {session ? (
-                                <div style={{ textAlign: 'right' }}>
-                                    <p style={{ fontSize: '0.8rem', margin: '0 0 4px 0' }}>
-                                        Signed in as <br/> <strong>{session.user?.email}</strong>
-                                    </p>
-                                    <button 
-                                        onClick={() => signOut()}
-                                        style={{ 
-                                            background: '#ef4444', color: 'white', border: 'none', 
-                                            padding: '4px 10px', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem' 
-                                        }}
-                                    >
-                                        Disconnect
-                                    </button>
-                                </div>
-                            ) : (
-                                <button 
-                                    onClick={() => signIn("google")}
-                                    style={{ 
-                                        background: '#3b82f6', color: 'white', border: 'none', 
-                                        padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontSize: '0.9rem' 
-                                    }}
-                                >
-                                    Connect
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                </div>
-
-                 {/* Placeholder for others */}
-                 <div style={{ ...cardStyle, opacity: 0.6, borderStyle: 'dashed' }}>
-                    <h3 style={{ margin: 0, color: '#666' }}>OneDrive (Coming Soon)</h3>
-                </div>
-            </section>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '2rem' }}>
-                 <button 
-                    onClick={handleSave} 
-                    disabled={saveStatus === 'saving'}
-                    style={{
-                        background: saveStatus === 'saved' ? '#10b981' : '#3b82f6',
-                        color: 'white',
-                        border: 'none',
-                        padding: '0.8rem 2rem',
-                        borderRadius: 6,
-                        fontWeight: 'bold',
-                        cursor: 'pointer',
-                        transition: 'background 0.2s',
-                        fontSize: '1rem'
-                    }}
-                 >
-                     {saveStatus === 'saving' ? 'Saving...' : (saveStatus === 'saved' ? 'Saved!' : 'Save Changes')}
-                 </button>
-            </div>
+             {/* Global Exit button (Top Right) */}
+             <Link href="/app" style={{ 
+                 position: 'absolute', top: '1rem', right: '1.5rem',
+                 padding: '8px 16px', borderRadius: '20px', 
+                 background: 'var(--surface)', border: '1px solid var(--border)',
+                 color: 'var(--secondary)', fontSize: '0.85rem',
+                 display: 'flex', alignItems: 'center', gap: 6,
+                 boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                 textDecoration: 'none',
+                 zIndex: 50
+             }}>
+                 ✕ Close
+             </Link>
         </div>
     );
 }
-
-// Simple Styles
-const sectionStyle = {
-    background: '#fff',
-    borderRadius: 8,
-    padding: '1.5rem',
-    marginBottom: '1.5rem',
-    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)'
-};
-
-const headerStyle = {
-    marginTop: 0,
-    marginBottom: '1.5rem',
-    fontSize: '1.25rem',
-    borderBottom: '1px solid #eee',
-    paddingBottom: '0.5rem'
-};
-
-const fieldGroupStyle = {
-    marginBottom: '1rem'
-};
-
-const labelStyle = {
-    display: 'block',
-    fontSize: '0.9rem',
-    fontWeight: 600,
-    marginBottom: '0.4rem',
-    color: '#333'
-};
-
-const inputStyle = {
-    width: '100%',
-    padding: '0.6rem',
-    borderRadius: 6,
-    border: '1px solid #ddd',
-    fontSize: '0.95rem',
-    fontFamily: 'inherit'
-};
-
-const cardStyle = {
-    background: '#f9fafb',
-    border: '1px solid #eee',
-    borderRadius: 6,
-    padding: '1rem',
-    marginBottom: '1rem'
-};
-
-const badgeStyle = {
-    background: '#dcfce7',
-    color: '#166534',
-    fontSize: '0.7rem',
-    padding: '2px 6px',
-    borderRadius: 4,
-    marginLeft: 8,
-    textTransform: 'uppercase' as const
-};

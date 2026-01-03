@@ -47,7 +47,7 @@ export function useMeechi() {
                 // Model Selection Logic via Registry
                 // Model Selection Logic via Registry
                 // Default: 1B for Low Power, 8B for High Power
-                const defaultLow = AVAILABLE_MODELS.find(m => m.low_power && m.family === 'llama')!.id;
+                const defaultLow = AVAILABLE_MODELS.local.find(m => m.low_power && m.family === 'llama')!.id;
                 // const defaultHigh = AVAILABLE_MODELS.find(m => !m.low_power && m.family === 'llama')!.id;
                 
                 let modelId = defaultLow; 
@@ -59,7 +59,7 @@ export function useMeechi() {
                     modelId = defaultLow;
                 } else {
                     // Check if the configModel exists in registry, otherwise fallback
-                    const exists = AVAILABLE_MODELS.find(m => m.id === configModel);
+                    const exists = AVAILABLE_MODELS.local.find(m => m.id === configModel);
                     modelId = exists ? exists.id : configModel;
                 }
                 
