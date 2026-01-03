@@ -112,6 +112,17 @@ Meechi is built with the latest web technologies to ensure speed, privacy, and r
     *   **AI Management**: Drag-and-drop provider ordering and simplified model selection.
 *   **Browser Sync**: Sync your "Ship's Log" across Chrome, Safari, and Desktop using the file system as the bridge.
 
+### 📦 Building for Desktop
+To build the standalone desktop application (Windows/macOS/Linux):
+
+1.  **Run the Build Script**:
+    ```bash
+    node scripts/build-desktop.js
+    ```
+    *This script automatically handles the conversion to static mode, disables incompatible API routes, builds the frontend, and packages it with Tauri.*
+
+2.  **Output**: Check `src-tauri/target/release/bundle` for your installer.
+
 > [!NOTE]  
 > See [CHANGELOG.md](./CHANGELOG.md) for full version history.
 

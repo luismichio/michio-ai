@@ -1,64 +1,87 @@
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { spawn } = require('child_process');
 
-const appDir = path.join(__dirname, '../src/app');
-let disabledFiles = [];
+// Configuration
+const apiDir = path.join(__dirname, '../src/app/api');
+const apiBackupDir = path.join(__dirname, '../src/app/_api_backup');
 
-function findAndDisableRoutes(dir) {
-    if (!fs.existsSync(dir)) return;
-    const items = fs.readdirSync(dir, { withFileTypes: true });
-    
-    for (const item of items) {
-        const fullPath = path.join(dir, item.name);
-        if (item.isDirectory()) {
-            findAndDisableRoutes(fullPath);
-        } else if (item.isFile() && item.name === 'route.ts') {
-            const disabledPath = fullPath + '.disabled';
-            try {
-                fs.renameSync(fullPath, disabledPath);
-                disabledFiles.push({ original: fullPath, disabled: disabledPath });
-                console.log(`Disabled: ${path.relative(appDir, fullPath)}`);
-            } catch (e) {
-                console.warn(`Failed to disable ${item.name}:`, e.message);
-            }
-        }
-    }
-}
+// Helper: Run Command
+function runCommand(command, args, env = {}) {
+    return new Promise((resolve, reject) => {
+        const child = spawn(command, args, {
+            stdio: 'inherit',
+            shell: true,
+            env: { ...process.env, ...env }
+        });
 
-function restoreRoutes() {
-    console.log('Restoring API routes...');
-    for (const { original, disabled } of disabledFiles) {
-        if (fs.existsSync(disabled)) {
-            try {
-                fs.renameSync(disabled, original);
-            } catch (e) {
-                console.error(`Failed to restore ${path.relative(appDir, original)}:`, e.message);
-            }
-        }
-    }
-}
-
-try {
-    console.log('Cleaning .next directory...');
-    if (fs.existsSync(path.join(__dirname, '../.next'))) {
-        fs.rmSync(path.join(__dirname, '../.next'), { recursive: true, force: true });
-    }
-
-    console.log('Scanning for API routes to disable...');
-    findAndDisableRoutes(appDir);
-
-    console.log('Running Desktop Build with STATIC_EXPORT=true...');
-    // Pass env var to the child process
-    execSync('yarn next build', {  
-        stdio: 'inherit',
-        env: { ...process.env, STATIC_EXPORT: 'true' }
+        child.on('close', (code) => {
+            if (code === 0) resolve();
+            else reject(new Error(`Command failed with code ${code}`));
+        });
     });
-
-    console.log('Build Success!');
-} catch (error) {
-    console.error('Build Failed:', error);
-    process.exit(1);
-} finally {
-    restoreRoutes();
 }
+
+async function main() {
+    console.log('🚀 Starting Desktop Build Process...');
+
+    // 1. Disable ALL API Routes (Required for Static Export)
+    // We rename the entire 'api' folder to '_api_backup' so Next.js ignores it.
+    if (fs.existsSync(apiDir)) {
+        console.log('📦 Disabling ALL API Routes for Static Build...');
+        // If backup exists from failed run, try to restore or overwrite?
+        if (fs.existsSync(apiBackupDir)) {
+            console.warn('⚠️ Found existing backup. Assuming previous build failed. Restoring first...');
+            try {
+                // If apiDir also exists, this is messy.
+                // Simpler: Just delete current apiDir and restore backup? No, that loses changes.
+                // Assume backup is stale or we should manually check.
+                // For automation, let's just move contents back if target is empty?
+                // SAFETY: Just error out if backup exists.
+                console.error('❌ Backup directory exists. Please check src/app/_api_backup manually.');
+                process.exit(1);
+            } catch (e) {}
+        }
+        
+        fs.renameSync(apiDir, apiBackupDir);
+    } else {
+        console.warn('⚠️ API Folder not found. Proceeding...');
+    }
+
+    try {
+        // 2. Run Next.js Build (Static Export)
+        console.log('🏗️  Building Next.js (Static Export)...');
+        // STATIC_EXPORT=true (triggers output: 'export' in next.config.ts)
+        // NEXT_PUBLIC_IS_STATIC=true (toggles AuthProvider)
+        await runCommand('yarn', ['build'], {
+            STATIC_EXPORT: 'true',
+            NEXT_PUBLIC_IS_STATIC: 'true'
+        });
+        
+        // 3. Run Tauri Build (Packaging)
+        console.log('📦 Packaging with Tauri...');
+        // We don't need env vars here since the static files are already built
+        await runCommand('yarn', ['tauri', 'build']);
+
+        console.log('✅ Build Success!');
+
+    } catch (err) {
+        console.error('❌ Build Failed:', err);
+        // We do NOT exit yet, we must restore files.
+        process.exitCode = 1;
+
+    } finally {
+        // 4. Restore API Routes (Cleanup)
+        if (fs.existsSync(apiBackupDir)) {
+            console.log('🧹 Restoring API Routes...');
+            if (fs.existsSync(apiDir)) {
+                 // Should not happen unless build recreated it?
+                 console.warn('⚠️ src/app/api exists unexpectedly. Removing to restore backup...');
+                 fs.rmSync(apiDir, { recursive: true, force: true });
+            }
+            fs.renameSync(apiBackupDir, apiDir);
+        }
+    }
+}
+
+main();

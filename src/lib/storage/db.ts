@@ -50,7 +50,7 @@ export class MeechiDB extends Dexie {
     journal!: Table<JournalEntry>;
 
     constructor() {
-        super('michio-db');
+        super('meechi-db');
         this.version(1).stores({
             files: 'path, remoteId, type, updatedAt'
         });

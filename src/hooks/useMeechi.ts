@@ -1,6 +1,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { localLlmService } from '@/lib/ai/local-llm';
+import { aiManager } from "@/lib/ai/manager";
 import { settingsManager, AppConfig } from '@/lib/settings';
 import { AIChatMessage } from '@/lib/ai/types';
 import { SYSTEM_PROMPT, RESEARCH_SYSTEM_PROMPT } from '@/lib/ai/prompts';
@@ -22,7 +23,7 @@ export function useMeechi() {
             const config = await settingsManager.getConfig();
             
             // Check Rate Limit Persisted
-            const persisted = localStorage.getItem('michio_rate_limit_cooldown');
+            const persisted = localStorage.getItem('meechi_rate_limit_cooldown');
             if (persisted) {
                  const ts = parseInt(persisted);
                  if (ts > Date.now()) setRateLimitCooldown(ts);
@@ -229,7 +230,14 @@ ${safeChatContext}
                 // This prevents the "hallucination" where AI just prints the result text
                 // ALSO FILTER ERROR MESSAGES so AI doesn't repeat them
                 // NEW: FILTER "REFUSALS". If the AI previously said "I don't have info", hide it so it doesn't repeat that pattern.
-                const cleanHistory = history.filter(m => 
+                const cleanHistory = history.map(m => {
+                    // Sanitize 'Michio:' prefixes from old logs to prevent hallucination
+                    let content = m.content;
+                    if (m.role === 'assistant' || m.role === 'michio' as any) {
+                         content = content.replace(/^(Michio|Meechi):\s*/i, '').trim();
+                    }
+                    return { role: m.role, content };
+                }).filter(m => 
                     !m.content.startsWith('> **Tool') && 
                     !m.content.startsWith('**Error**') &&
                     !m.content.startsWith('Error:') &&
@@ -257,6 +265,9 @@ ${safeChatContext}
                         "**Reference", "**Source", "### Reference", "### Source"
                     ] : undefined
                 });
+                
+                // FINAL SANITIZATION BEFORE TOOLS/HISTORY
+                finalContent = finalContent.replace(/^((Michio|Meechi|Echo|Assistant):\s*)+/i, '').trim();
                 
                 console.log(`[Raw AI Output (${mode})]:`, finalContent);
 
@@ -359,6 +370,29 @@ ${safeChatContext}
                 throw new Error(`Rate limit active until ${new Date(rateLimitCooldown).toLocaleTimeString()}`);
             }
 
+            // STATIC DESKTOP MODE: Direct Client-Side Call
+            const isStatic = process.env.NEXT_PUBLIC_IS_STATIC === 'true';
+            
+            if (isStatic) {
+                console.log("[Meechi] Static Mode: Calling AI Client-Side...");
+                const result = await aiManager.chat(
+                   userMsg,
+                   systemMsg, // Context is already embedded in system/user msg by now
+                   history,
+                   config,
+                   [] // Tools (TODO: Support client-side tools if needed)
+                );
+                
+                // Emulate Stream (roughly) or just dump content
+                // AIManager returns full completion currently, not stream.
+                // We'll just dump it all at once for now or chunk it?
+                // The UI expects incremental updates if possible, but one big update is fine.
+                onUpdate(result.content);
+                return;
+            }
+
+            // WEB/PWA MODE: Server API Call
+
             const res = await fetch("/api/chat", {
                 method: "POST",
                 body: JSON.stringify({
@@ -375,7 +409,7 @@ ${safeChatContext}
                     const retryAfter = 60 * 1000; // Default 1m
                     const cooldown = Date.now() + retryAfter;
                     setRateLimitCooldown(cooldown);
-                    localStorage.setItem('michio_rate_limit_cooldown', cooldown.toString());
+                    localStorage.setItem('meechi_rate_limit_cooldown', cooldown.toString());
                 }
                 throw new Error(`Server Error: ${res.status}`);
             }

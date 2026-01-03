@@ -1,8 +1,9 @@
 'use client';
 import { AppConfig } from '@/lib/settings';
-import { isTauri } from '@/lib/platform'; // Note: Importing from lib
+import { isTauri } from '@/lib/platform';
 import { nativeSync } from '@/lib/storage/native-sync';
 import { useState } from 'react';
+import { DesktopGoogleAuth } from '@/components/DesktopGoogleAuth';
 
 interface StorageSettingsProps {
     config: AppConfig;
@@ -12,8 +13,10 @@ interface StorageSettingsProps {
 
 export function StorageSettings({ config, syncPath, setSyncPath }: StorageSettingsProps) {
     const [isSyncing, setIsSyncing] = useState(false);
+    const isStatic = process.env.NEXT_PUBLIC_IS_STATIC === 'true';
 
     const cardStyle = {
+// ... existing styles ...
         padding: '1.5rem',
         background: 'var(--surface)',
         borderRadius: 'var(--radius, 8px)',
@@ -121,14 +124,16 @@ export function StorageSettings({ config, syncPath, setSyncPath }: StorageSettin
             <h4 style={{ margin: '2rem 0 1rem', color: 'var(--secondary)', textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '0.05em' }}>
                 Cloud Drive
             </h4>
-            <div style={{ ...cardStyle, opacity: 0.7 }}>
+            <div style={{ ...cardStyle }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                      <h3 style={{ margin: 0 }}>Google Drive</h3>
-                     <span style={{ fontSize: '0.8rem', color: 'var(--secondary)', background: 'var(--background)', padding: '2px 6px', borderRadius: 4 }}>Coming Soon</span>
+                     {!isStatic && <span style={{ fontSize: '0.8rem', color: 'var(--secondary)', background: 'var(--background)', padding: '2px 6px', borderRadius: 4 }}>Coming Soon</span>}
                 </div>
-                 <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', color: '#666' }}>
+                 <p style={{ margin: '4px 0 12px 0', fontSize: '0.85rem', color: '#666' }}>
                     Connect your Google Drive to RAG against your cloud files.
                 </p>
+
+                {isStatic && <DesktopGoogleAuth />}
             </div>
             
              <div style={{ ...cardStyle, opacity: 0.7 }}>

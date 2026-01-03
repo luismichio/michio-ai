@@ -3,6 +3,15 @@
 
 
 
+### v1.2.0 - The Autonomous Desktop (Jan 2026)
+*   **Static Desktop Architecture**:
+    *   **Serverless Core**: The application can now be built as a purely static export (`next export`), enabling native desktop apps without a Node.js backend.
+    *   **Client-Side AI**: Refactored `useMeechi.ts` to call Groq and Gemini APIs directly from the client when in desktop mode, ensuring full AI functionality without server API routes.
+    *   **Client-Side Drive**: Implemented a standalone `ClientDriveService` and `DesktopGoogleAuth` flow to authenticate and sync with Google Drive directly from the desktop app.
+    *   **Mock Authentication**: Introduced `MockSessionProvider` to simulate user sessions in static builds, preventing NextAuth crashes.
+*   **DevOps**:
+    *   **Automated Build**: Added `scripts/build-desktop.js` to automatically handle the complex process of disabling API routes, building static assets, and packaging with Tauri.
+
 ### v0.9.99 - The Desktop Era (Jan 2026)
 *   **Meechi Desktop**: First official desktop release (Windows MSI / macOS DMG).
     *   **Bundled App**: Runs locally with no browser required.

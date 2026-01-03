@@ -33,7 +33,7 @@ export default function Home() {
   const [chatInput, setChatInput] = useState("");
   // Messages now hold more metadata
   const [messages, setMessages] = useState<{
-      role: 'user' | 'michio', 
+      role: 'user' | 'meechi', 
       content: string, 
       timestamp?: string, 
       fullDate?: Date,
@@ -126,7 +126,7 @@ export default function Home() {
       const logEntry = `### ${timestamp}\n**Meechi**: I have added *${fileName}* to the *${topic}* collection.\n`;
       await storage.appendFile(`history/${currentDate}.md`, logEntry);
       
-      setMessages(prev => [...prev, { role: 'michio', content: `I have added *${fileName}* to the *${topic}* collection.` }]);
+      setMessages(prev => [...prev, { role: 'meechi', content: `I have added *${fileName}* to the *${topic}* collection.` }]);
       
       // Trigger Source Sync
       syncNow();
@@ -310,7 +310,7 @@ export default function Home() {
     const chunks = log.split('### ').filter(c => c.trim());
     
     const msgs: {
-        role: 'user' | 'michio', 
+        role: 'user' | 'meechi', 
         content: string, 
         timestamp?: string,
         fullDate?: Date,
@@ -354,7 +354,7 @@ export default function Home() {
              msgs.push({ role: 'user', content, timestamp: timestampRaw, fullDate, mode });
         } else if (body.includes('**Meechi**:')) {
              const content = body.replace('**Meechi**:', '').trim();
-             msgs.push({ role: 'michio', content, timestamp: timestampRaw, fullDate, mode });
+             msgs.push({ role: 'meechi', content, timestamp: timestampRaw, fullDate, mode });
         }
     });
 
@@ -444,7 +444,7 @@ export default function Home() {
                  if (config.identity.name === 'Traveler') {
                       allMessages = [{
                           role: 'michio',
-                          content: "Hello! I am Michio, your personal cognitive partner. We haven't been properly introduced yet. What should I call you?",
+                          content: "Hello! I am Meechi, your personal cognitive partner. We haven't been properly introduced yet. What should I call you?",
                           timestamp: formatMessageTime(new Date()),
                           fullDate: new Date(),
                           mode: 'chat'
@@ -564,7 +564,7 @@ export default function Home() {
     const placeholderDate = new Date();
 
     setMessages(prev => [...prev, { 
-        role: 'michio', 
+        role: 'meechi', 
         content: "...", 
         timestamp: respTimeDisplay,
         fullDate: placeholderDate,
@@ -610,7 +610,7 @@ export default function Home() {
 
     // 6. CHAT/RESEARCH MODE: Proceed to AI
     const historyForAI: AIChatMessage[] = messages.slice(-10).map(m => ({
-        role: m.role === 'michio' ? 'assistant' : 'user',
+        role: m.role === 'meechi' ? 'assistant' : 'user',
         content: m.content
     }));
 
@@ -622,12 +622,15 @@ export default function Home() {
         fullContext,
         (chunk) => {
              currentContent += chunk;
+             // UI SANITIZATION: Remove Identity Prefix if present
+             const cleanDisplay = currentContent.replace(/^((Michio|Meechi|Echo|Assistant):\s*)+/i, '');
+             
              setMessages(prev => {
                 const newArr = [...prev];
                 const lastIdx = newArr.length - 1;
                 // Ensure we are updating the assistant message
-                if (newArr[lastIdx] && newArr[lastIdx].role === 'michio') {
-                     newArr[lastIdx] = { ...newArr[lastIdx], content: currentContent };
+                if (newArr[lastIdx] && newArr[lastIdx].role === 'meechi') {
+                     newArr[lastIdx] = { ...newArr[lastIdx], content: cleanDisplay };
                 }
                 return newArr;
              });
@@ -643,7 +646,7 @@ export default function Home() {
              setMessages(prev => {
                 const newArr = [...prev];
                 const lastIdx = newArr.length - 1;
-                if (newArr[lastIdx] && newArr[lastIdx].role === 'michio') {
+                if (newArr[lastIdx] && newArr[lastIdx].role === 'meechi') {
                      newArr[lastIdx] = { ...newArr[lastIdx], content: currentContent };
                 }
                 return newArr;
@@ -808,20 +811,20 @@ export default function Home() {
                     return (
                     <div key={i}>
                         {timeDivider}
-                        <div className={`${styles.message} ${msg.role === 'user' ? styles.userMessage : styles.michioMessage}`}>
+                        <div className={`${styles.message} ${msg.role === 'user' ? styles.userMessage : styles.meechiMessage}`}>
                             <div style={{ 
                                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                                 marginBottom: 4, fontSize: '0.75rem', opacity: 0.6,
                                 gap: '1rem'
                             }}>
-                                <strong>{msg.role === 'michio' ? 'Meechi' : 'You'}</strong>
+                                <strong>{msg.role === 'meechi' ? 'Meechi' : 'You'}</strong>
                                 <span style={{display: 'flex', alignItems: 'center', gap: '4px'}}>
                                     {msg.mode && <span title={msg.mode}><ModeIcon mode={msg.mode} /></span>}
                                     {displayTime}
                                 </span>
                             </div>
                             
-                            {msg.role === 'michio' ? (
+                            {msg.role === 'meechi' ? (
                                 (() => {
                                     const raw = msg.content;
                                     // Clean generic placeholder

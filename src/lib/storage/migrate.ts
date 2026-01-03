@@ -1,5 +1,6 @@
 import { openDB } from 'idb';
 import { db, FileRecord } from './db';
+import Dexie from 'dexie';
 
 const OLD_DB_NAME = 'michio-local-v1';
 const OLD_STORE_NAME = 'files';
@@ -45,6 +46,65 @@ export async function migrateFromIdbToDexie() {
 
     } catch (e) {
         console.warn("Migration check failed (safe to ignore if new user)", e);
+    }
+}
+
+const OLD_MICHIO_DB = 'michio-db';
+
+export async function migrateFromMichioToMeechi() {
+    // Check if new DB is empty
+    const count = await db.files.count();
+    if (count > 0) return; // Already initialized
+
+    // Check if old DB exists via Dexie
+    const oldExists = await Dexie.exists(OLD_MICHIO_DB);
+    if (!oldExists) return;
+
+    console.log("[Meechi] Migrating from michio-db...");
+
+    try {
+        const oldDb = new Dexie(OLD_MICHIO_DB);
+        oldDb.version(1).stores({
+            files: 'path, remoteId, type, updatedAt'
+        });
+        // We know up to version 6 existed, let's just try to open dynamic or match the latest structure
+        // Since Dexie can open dynamically if we don't specify version, or we can use idb to just dump stores.
+        // Using idb is safer for raw dump.
+        
+        const oldIdb = await openDB(OLD_MICHIO_DB);
+        
+        // Migrate Files
+        if (oldIdb.objectStoreNames.contains('files')) {
+            const files = await oldIdb.getAll('files');
+            if (files.length > 0) {
+                // Ensure tags/metadata structure if moving from v6
+                // But since our current schema is v6, we can just put them in.
+                // We might need to sanitize if schema changed, but it hasn't between michio->meechi rename.
+                await db.files.bulkPut(files);
+                console.log(`[Meechi] Transferred ${files.length} files from michio-db`);
+            }
+        }
+        
+        // Migrate Settings
+        if (oldIdb.objectStoreNames.contains('settings')) {
+            const settings = await oldIdb.getAll('settings');
+            if (settings.length > 0) {
+                 await db.settings.bulkPut(settings);
+            }
+        }
+        
+        // Migrate Journal
+        if (oldIdb.objectStoreNames.contains('journal')) {
+             const journal = await oldIdb.getAll('journal');
+             if (journal.length > 0) {
+                 await db.journal.bulkPut(journal);
+             }
+        }
+
+        console.log("[Meechi] Migration complete.");
+
+    } catch (e) {
+        console.error("[Meechi] Migration from michio-db failed", e);
     }
 }
 
