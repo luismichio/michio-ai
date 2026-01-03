@@ -158,7 +158,7 @@ export class SyncEngine {
     }
 
     private async handleRemoteChange(driveFile: any, onProgress?: (msg: string) => void) {
-        // driveFile has id, name, mimeType, parents, modifiedTime
+        // driveFile has id, name, mimeType, parents, modifiedTime, appProperties
         const isFolder = driveFile.mimeType === 'application/vnd.google-apps.folder';
         
         // 1. Determine Local Path & VERIFY SCOPE
@@ -266,9 +266,24 @@ export class SyncEngine {
         // 3. Determine Local Conflict / Movement
         const localFile = await db.files.where('remoteId').equals(driveFile.id).first();
         
+        // 3b. Extract Metadata from AppProperties
+        let remoteTags: string[] = [];
+        let remoteMetadata: any = {};
+        if (driveFile.appProperties?.meechi_meta) {
+            try {
+                const parsed = JSON.parse(driveFile.appProperties.meechi_meta);
+                remoteTags = parsed.tags || [];
+                remoteMetadata = parsed.metadata || {};
+            } catch (e) {
+                console.warn(`[SyncDown] Failed to parse meechi_meta for ${path}`, e);
+            }
+        }
+
         let finalContent: string | Blob | ArrayBuffer = content;
         let finalDirty = 0;
         let finalUpdatedAt = new Date(driveFile.modifiedTime).getTime();
+        let finalTags = remoteTags;
+        let finalMetadata = remoteMetadata;
 
         if (localFile) {
             // Check if content matches (checksum) to avoid spurious writes
@@ -282,6 +297,8 @@ export class SyncEngine {
                     // We still proceed to check for path changes below.
                     finalContent = localFile.content; // Keep existing local content
                     finalUpdatedAt = localFile.updatedAt; // Keep existing local updated time
+                    finalTags = localFile.tags || [];
+                    finalMetadata = localFile.metadata || {};
                 }
             }
 
@@ -290,6 +307,8 @@ export class SyncEngine {
                 finalContent = localFile.content;
                 finalDirty = 1;
                 finalUpdatedAt = localFile.updatedAt;
+                finalTags = localFile.tags || [];
+                finalMetadata = localFile.metadata || {};
             }
 
             // If path changed, remove old record
@@ -328,9 +347,8 @@ export class SyncEngine {
             content: finalContent,
             updatedAt: finalUpdatedAt,
             dirty: finalDirty,
-            // Preserve existing metadata/tags unless we have a strategy to sync them (future)
-            tags: existingRecord?.tags || [],
-            metadata: existingRecord?.metadata || {}
+            tags: finalTags,
+            metadata: finalMetadata
         });
 
         // Trigger semantic indexing for incoming files
@@ -403,6 +421,12 @@ export class SyncEngine {
                             updates.name = name;
                         }
                         
+                        // Check Metadata Property
+                        const metaJson = JSON.stringify({ tags: file.tags || [], metadata: file.metadata || {} });
+                        if (remoteFile.appProperties?.meechi_meta !== metaJson) {
+                            updates.appProperties = { meechi_meta: metaJson };
+                        }
+                        
                         // Check Parent (Move)
                         const currentRemoteParent = remoteFile.parents?.[0];
                         
@@ -434,7 +458,10 @@ export class SyncEngine {
                     if (file.type === 'folder') {
                         res = await this.drive.createFolder(name, parentId);
                     } else {
-                        res = await this.drive.createFile(name, parentId || null, file.content);
+                        const appProperties = {
+                             meechi_meta: JSON.stringify({ tags: file.tags || [], metadata: file.metadata || {} })
+                        };
+                        res = await this.drive.createFile(name, parentId || null, file.content, appProperties);
                     }
                     
                     // Update local with new Remote ID

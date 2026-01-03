@@ -6,11 +6,11 @@ export const metadata: Metadata = {
   description: 'A journal for the wandering soul.',
 };
 
-import { AuthProvider } from './components/AuthProvider';
-import ServiceWorkerManager from './components/ServiceWorkerManager';
+import { AuthProvider } from '@/components/AuthProvider';
+import ServiceWorkerManager from '@/components/ServiceWorkerManager';
 
 import { Inter, Lora } from 'next/font/google';
-import { ThemeProvider } from '@/providers/theme-provider';
+import { ThemeProvider } from '@/components/ThemeProvider';
 
 const inter = Inter({ 
   subsets: ['latin', 'cyrillic'],

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import styles from '../page.module.css';
+import styles from '@/app/app/page.module.css';
 
 // Tiptap Imports
 import { useEditor, EditorContent, Extension, ReactNodeViewRenderer, SingleCommands } from '@tiptap/react';
@@ -13,11 +13,8 @@ import { Color } from '@tiptap/extension-color';
 import { Extension as CoreExtension, getMarkRange } from '@tiptap/core'; // Use core for Extension base
 import { Plugin } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
-import { 
-    Bold, Italic, Strikethrough, Code, Link as LinkIcon, 
-    Highlighter, MessageSquare, MessageSquareText, ChevronDown, FolderOpen, Edit3, Trash2, Save, X,
-    Type, Heading1, Heading2, Heading3, List, ListOrdered, Quote, Minus
-} from 'lucide-react'; // Notion-style Icons
+import Icon from '@/components/Icon';
+
 
 interface SourceEditorProps {
     file: {
@@ -89,15 +86,15 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
     const [slashIndex, setSlashIndex] = useState(0);
 
     const SLASH_COMMANDS = [
-        { label: 'Text', icon: <Type size={16} />, action: (chain: any) => chain.setParagraph(), style: {} },
-        { label: 'Heading 1', icon: <Heading1 size={16} />, action: (chain: any) => chain.toggleHeading({ level: 1 }), style: { fontSize: '1.2em', fontWeight: 700 } },
-        { label: 'Heading 2', icon: <Heading2 size={16} />, action: (chain: any) => chain.toggleHeading({ level: 2 }), style: { fontSize: '1.1em', fontWeight: 600 } },
-        { label: 'Heading 3', icon: <Heading3 size={16} />, action: (chain: any) => chain.toggleHeading({ level: 3 }), style: { fontSize: '1em', fontWeight: 600 } },
-        { label: 'Bullet List', icon: <List size={16} />, action: (chain: any) => chain.toggleBulletList(), style: {} },
-        { label: 'Numbered List', icon: <ListOrdered size={16} />, action: (chain: any) => chain.toggleOrderedList(), style: {} },
-        { label: 'Quote', icon: <Quote size={16} />, action: (chain: any) => chain.toggleBlockquote(), style: {} },
-        { label: 'Divider', icon: <Minus size={16} />, action: (chain: any) => chain.setHorizontalRule(), style: {} },
-        { label: 'Code Block', icon: <Code size={16} />, action: (chain: any) => chain.toggleCodeBlock(), style: { fontFamily: 'monospace', background: 'rgba(0,0,0,0.05)', padding: '2px 4px', borderRadius: 4 } },
+        { label: 'Text', icon: <Icon name="Type" size={16} />, action: (chain: any) => chain.setParagraph(), style: {} },
+        { label: 'Heading 1', icon: <Icon name="Heading1" size={16} />, action: (chain: any) => chain.toggleHeading({ level: 1 }), style: { fontSize: '1.2em', fontWeight: 700 } },
+        { label: 'Heading 2', icon: <Icon name="Heading2" size={16} />, action: (chain: any) => chain.toggleHeading({ level: 2 }), style: { fontSize: '1.1em', fontWeight: 600 } },
+        { label: 'Heading 3', icon: <Icon name="Heading3" size={16} />, action: (chain: any) => chain.toggleHeading({ level: 3 }), style: { fontSize: '1em', fontWeight: 600 } },
+        { label: 'Bullet List', icon: <Icon name="List" size={16} />, action: (chain: any) => chain.toggleBulletList(), style: {} },
+        { label: 'Numbered List', icon: <Icon name="ListOrdered" size={16} />, action: (chain: any) => chain.toggleOrderedList(), style: {} },
+        { label: 'Quote', icon: <Icon name="Quote" size={16} />, action: (chain: any) => chain.toggleBlockquote(), style: {} },
+        { label: 'Divider', icon: <Icon name="Minus" size={16} />, action: (chain: any) => chain.setHorizontalRule(), style: {} },
+        { label: 'Code Block', icon: <Icon name="Code" size={16} />, action: (chain: any) => chain.toggleCodeBlock(), style: { fontFamily: 'monospace', background: 'rgba(0,0,0,0.05)', padding: '2px 4px', borderRadius: 4 } },
     ];
 
     const filteredSlashCommands = SLASH_COMMANDS.filter(cmd => 
@@ -1209,18 +1206,18 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                          {/* Primary Actions: Only Edit/Save for Notes */}
                          {!isSource && !isEditing && (
                             <button onClick={() => setIsEditing(true)} className={styles.secondaryButton} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <Edit3 size={16} /> Edit
+                                <Icon name="Edit3" size={16} /> Edit
                             </button>
                          )}
                          
                          {isEditing && (
                              <button onClick={handleSave} className={styles.primaryButton} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                 <Save size={16} /> Save
+                                 <Icon name="Save" size={16} /> Save
                              </button>
                          )}
 
                         <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', marginLeft: '0.5rem', display: 'flex', alignItems: 'center' }}>
-                            <X size={24} />
+                            <Icon name="X" size={24} />
                         </button>
                     </div>
                 </div>
@@ -1234,7 +1231,7 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                             padding: '2px 8px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 4
                         }}>
                             {t}
-                            <span onClick={() => removeTag(t)} style={{ cursor: 'pointer', opacity: 0.5, display: 'flex', alignItems: 'center' }}><X size={12} /></span>
+                            <span onClick={() => removeTag(t)} style={{ cursor: 'pointer', opacity: 0.5, display: 'flex', alignItems: 'center' }}><Icon name="X" size={12} /></span>
                         </span>
                     ))}
                     <input 
@@ -1268,33 +1265,33 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                                 }}>
                                     {/* Dropdown Placeholder (Turn Into) */}
                                     <div className={styles.bubbleDropdown} onClick={() => setActiveDropdown(activeDropdown === 'turnInto' ? null : 'turnInto')} style={{position:'relative'}}>
-                                        <span>Turn into</span> <ChevronDown size={14} />
+                                        <span>Turn into</span> <Icon name="ChevronDown" size={14} />
                                         
                                         {activeDropdown === 'turnInto' && (
                                             <div className={styles.dropdownMenu} onClick={e => e.stopPropagation()}>
                                                 <div className={styles.dropdownItem} onClick={() => { editor.chain().focus().setParagraph().run(); editor.commands.setTextSelection(editor.state.selection.to); setActiveDropdown(null); setEditMenuPos(null); }}>
-                                                    <Type size={14} /> Text
+                                                    <Icon name="Type" size={14} /> Text
                                                 </div>
                                                 <div className={styles.dropdownItem} onClick={() => { editor.chain().focus().toggleHeading({level:1}).run(); editor.commands.setTextSelection(editor.state.selection.to); setActiveDropdown(null); setEditMenuPos(null); }}>
-                                                    <Heading1 size={14} /> Heading 1
+                                                    <Icon name="Heading1" size={14} /> Heading 1
                                                 </div>
                                                 <div className={styles.dropdownItem} onClick={() => { editor.chain().focus().toggleHeading({level:2}).run(); editor.commands.setTextSelection(editor.state.selection.to); setActiveDropdown(null); setEditMenuPos(null); }}>
-                                                    <Heading2 size={14} /> Heading 2
+                                                    <Icon name="Heading2" size={14} /> Heading 2
                                                 </div>
                                                 <div className={styles.dropdownItem} onClick={() => { editor.chain().focus().toggleHeading({level:3}).run(); editor.commands.setTextSelection(editor.state.selection.to); setActiveDropdown(null); setEditMenuPos(null); }}>
-                                                    <Heading3 size={14} /> Heading 3
+                                                    <Icon name="Heading3" size={14} /> Heading 3
                                                 </div>
                                                 <div className={styles.dropdownItem} onClick={() => { editor.chain().focus().toggleBulletList().run(); editor.commands.setTextSelection(editor.state.selection.to); setActiveDropdown(null); setEditMenuPos(null); }}>
-                                                    <List size={14} /> Bullet List
+                                                    <Icon name="List" size={14} /> Bullet List
                                                 </div>
                                                 <div className={styles.dropdownItem} onClick={() => { editor.chain().focus().toggleOrderedList().run(); editor.commands.setTextSelection(editor.state.selection.to); setActiveDropdown(null); setEditMenuPos(null); }}>
-                                                    <ListOrdered size={14} /> Numbered List
+                                                    <Icon name="ListOrdered" size={14} /> Numbered List
                                                 </div>
                                                 <div className={styles.dropdownItem} onClick={() => { editor.chain().focus().toggleBlockquote().run(); editor.commands.setTextSelection(editor.state.selection.to); setActiveDropdown(null); setEditMenuPos(null); }}>
-                                                    <Quote size={14} /> Quote
+                                                    <Icon name="Quote" size={14} /> Quote
                                                 </div>
                                                 <div className={styles.dropdownItem} onClick={() => { editor.chain().focus().toggleCodeBlock().run(); editor.commands.setTextSelection(editor.state.selection.to); setActiveDropdown(null); setEditMenuPos(null); }}>
-                                                    <Code size={14} /> Code Block
+                                                    <Icon name="Code" size={14} /> Code Block
                                                 </div>
                                             </div>
                                         )}
@@ -1307,28 +1304,28 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                                             className={`${styles.bubbleBtn} ${editor.isActive('bold') ? styles.bubbleBtnActive : ''}`}
                                             title="Bold (Cmd+B)"
                                         >
-                                            <Bold size={16} />
+                                            <Icon name="Bold" size={16} />
                                         </button>
                                         <button 
                                             onClick={() => editor.chain().focus().toggleItalic().run()} 
                                             className={`${styles.bubbleBtn} ${editor.isActive('italic') ? styles.bubbleBtnActive : ''}`}
                                             title="Italic (Cmd+I)"
                                         >
-                                            <Italic size={16} />
+                                            <Icon name="Italic" size={16} />
                                         </button>
                                         <button 
                                             onClick={() => editor.chain().focus().toggleStrike().run()} 
                                             className={`${styles.bubbleBtn} ${editor.isActive('strike') ? styles.bubbleBtnActive : ''}`}
                                             title="Strikethrough (Cmd+Shift+S)"
                                         >
-                                            <Strikethrough size={16} />
+                                            <Icon name="Strikethrough" size={16} />
                                         </button>
                                         <button 
                                             onClick={() => editor.chain().focus().toggleCode().run()} 
                                             className={`${styles.bubbleBtn} ${editor.isActive('code') ? styles.bubbleBtnActive : ''}`}
                                             title="Code (Cmd+E)"
                                         >
-                                            <Code size={16} />
+                                            <Icon name="Code" size={16} />
                                         </button>
 
                                         <div className={styles.bubbleDivider} />
@@ -1338,7 +1335,7 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                                             className={`${styles.bubbleBtn} ${editor.isActive('link') ? styles.bubbleBtnActive : ''}`}
                                             title="Link"
                                         >
-                                            <LinkIcon size={16} />
+                                            <Icon name="Link" size={16} />
                                         </button>
                                         
                                         {/* Color Picker Placeholder */}
@@ -1368,7 +1365,7 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                                             className={styles.bubbleBtn}
                                             title="Add Comment"
                                         >
-                                            <MessageSquareText size={16} />
+                                            <Icon name="MessageSquareText" size={16} />
                                         </button>
                                     </div>
                             )}
@@ -1408,7 +1405,7 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                                     visibility: 'visible'
                                 }}>
                                     <button onClick={handleAddComment} title="Add Comment" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                        <MessageSquareText size={14} /> Add Comment
+                                        <Icon name="MessageSquareText" size={14} /> Add Comment
                                     </button>
                                 </div>
                             )}
@@ -1507,25 +1504,25 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                                                       {comment.text}
                                                   </div>
 
-                                                 <div className={styles.commentActions}>
-                                                     <button 
-                                                         className={styles.commentActionBtn}
-                                                         onClick={() => handleStartEditComment(comment)}
-                                                         title="Edit Comment"
-                                                     >
-                                                         {/* Pencil Icon */}
-                                                         <Edit3 size={14} />
-                                                     </button>
-                                                     <button 
-                                                         className={styles.commentActionBtn}
-                                                         onClick={() => handleDeleteComment(comment.id)}
-                                                         title="Delete Comment"
-                                                         style={{ color: '#ef4444' }} // Red for delete
-                                                     >
-                                                         {/* Trash Icon */}
-                                                         <Trash2 size={14} />
-                                                     </button>
-                                                 </div>
+                                                <div className={styles.commentActions}>
+                                                    <button 
+                                                        className={styles.commentActionBtn}
+                                                        onClick={() => handleStartEditComment(comment)}
+                                                        title="Edit Comment"
+                                                    >
+                                                        {/* Pencil Icon */}
+                                                        <Icon name="Edit3" size={14} />
+                                                    </button>
+                                                    <button 
+                                                        className={styles.commentActionBtn}
+                                                        onClick={() => handleDeleteComment(comment.id)}
+                                                        title="Delete Comment"
+                                                        style={{ color: '#ef4444' }} // Red for delete
+                                                    >
+                                                        {/* Trash Icon */}
+                                                        <Icon name="Trash2" size={14} />
+                                                    </button>
+                                                </div>
                                              </>
                                          )}
                                      </div>
@@ -1589,7 +1586,7 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                                                  }
                                              }}
                                          >
-                                             <MessageSquare size={16} strokeWidth={2.5} />
+                                             <Icon name="MessageSquare" size={16} strokeWidth={2.5} />
                                              {icon.count > 1 && (
                                                  <span style={{
                                                      position: 'absolute',

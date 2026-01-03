@@ -1,15 +1,11 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
 import { StorageProvider, FileMeta } from '@/lib/storage/types';
-import styles from '../page.module.css';
+import styles from '@/app/app/page.module.css';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, FileRecord } from '@/lib/storage/db';
 import { extractTextFromPdf } from '@/lib/pdf';
-import { 
-  ArrowLeft, CheckSquare, Square, Trash2, 
-  RefreshCw, FolderPlus, Link, Upload, Clock, 
-  FileText, File as FileIcon, Folder, Book, MoreVertical, ChevronRight
-} from 'lucide-react';
+import Icon from '@/components/Icon';
 
 interface FileExplorerProps {
     storage: StorageProvider;
@@ -35,15 +31,28 @@ export default function FileExplorer(props: FileExplorerProps) {
     const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
     const [isBulkMode, setIsBulkMode] = useState(false);
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+    // Close menu on click outside - Use CAPTURE to handle before React bubbles
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+             // Don't close if clicking the kebab button OR inside the menu (let item handlers manage closure)
+             if ((e.target as Element).closest(`.${styles.kebabButton}`) || (e.target as Element).closest(`.${styles.dropdownMenu}`)) return;
+             setActiveMenuId(null);
+        };
+        document.addEventListener('click', handleClickOutside, true);
+        return () => document.removeEventListener('click', handleClickOutside, true);
+    }, []);
     const lastInteractionIndex = useRef<number>(-1);
 
     // Dialog State
     type DialogAction = 
         | { type: 'rename', file: FileMeta, value: string } 
         | { type: 'delete', file: FileMeta }
-        | { type: 'alert', title: string, message: string, onConfirm?: () => void };
+        | { type: 'alert', title: string, message: string, onConfirm?: () => void }
+        | { type: 'confirm', title: string, message: string, confirmLabel?: string, onConfirm: () => void };
     const [dialogAction, setDialogAction] = useState<DialogAction | null>(null);
 
     // Link Dialog State
@@ -100,8 +109,14 @@ export default function FileExplorer(props: FileExplorerProps) {
             setLinkUrl("");
             showAlert("Success", "Link added successfully!");
 
+            await storage.saveFile(path, finalContent);
+            
+            setIsLinkDialogOpen(false);
+            setLinkUrl("");
+            showAlert("Success", "Link added successfully!");
+
         } catch (e: any) {
-            alert("Failed to add link: " + e.message);
+            showAlert("Error", "Failed to add link: " + e.message);
         } finally {
             setIsFetchingLink(false);
         }
@@ -153,7 +168,9 @@ export default function FileExplorer(props: FileExplorerProps) {
                     path: f.path,
                     updatedAt: f.updatedAt,
                     type: f.type,
-                    remoteId: f.remoteId
+                    remoteId: f.remoteId,
+                    tags: f.tags,
+                    metadata: f.metadata
                 });
             }
         });
@@ -164,8 +181,10 @@ export default function FileExplorer(props: FileExplorerProps) {
         // If we have "foo.pdf" and "foo.pdf.source.md", hide "foo.pdf" and rename "foo.pdf.source.md" to "foo.pdf (Source)"
         
         // 1. Find all sources
+        // 1. Find all sources and potential wrapper notes
         const sources = currentLevelFiles.filter(f => f.name.endsWith('.source.md'));
         const sourceMap = new Set(sources.map(s => s.name));
+        const allFileNames = new Set(currentLevelFiles.map(f => f.name));
 
         // 2. Filter out raw PDFs if they have a source
         const finalFiles = currentLevelFiles.filter(f => {
@@ -173,7 +192,10 @@ export default function FileExplorer(props: FileExplorerProps) {
              if (isSource) return true;
 
              const potentialSourceName = f.name + '.source.md';
-             if (sourceMap.has(potentialSourceName)) return false; // Hide raw PDF
+             if (sourceMap.has(potentialSourceName)) return false; // Hide raw PDF if Source exists
+             
+             const potentialNoteName = f.name + '.md';
+             if (allFileNames.has(potentialNoteName)) return false; // Hide raw PDF if Converted Note exists
              
              return true;
         }).map(f => {
@@ -412,17 +434,26 @@ export default function FileExplorer(props: FileExplorerProps) {
 
     const handleToggleSourceStatus = async (file: FileMeta) => {
         try {
+            // Fetch FRESH metadata from storage to ensure we don't lose 'edited' status
+            const freshFile = await storage.getFile(file.path);
+            if (!freshFile) {
+                showAlert("Error", "File not found locally.");
+                return;
+            }
+
+            const currentMeta = freshFile.metadata || {};
+
             if (file.type === 'source') {
                 // Convert to Note: Rename .source.md -> .md
                 const newPath = file.path.replace('.source.md', '.md');
                 await storage.renameFile(file.path, newPath);
-                // Also update metadata if needed (but rename usually preserves content, metadata update necessary for isSource)
-                const meta = file.metadata || {};
-                await storage.updateMetadata(newPath, { metadata: { ...meta, isSource: false } });
-                alert(`Converted "${file.name}" to Note.`);
+                
+                // Preserve existing metadata (including 'edited'), just flip isSource
+                await storage.updateMetadata(newPath, { type: 'file', metadata: { ...currentMeta, isSource: false } });
+                
+                showAlert("Success", `Converted "${file.name}" to Note.`);
             } else {
-                // Convert to Source: Rename .md -> .source.md (or just update metadata + rename?)
-                // If user wants to "Make Source", we usually append .source.md to imply it's a source.
+                // Convert to Source: Rename .md -> .source.md
                 let newPath = file.path;
                 if (!newPath.endsWith('.source.md')) {
                     if (newPath.endsWith('.md')) {
@@ -433,13 +464,13 @@ export default function FileExplorer(props: FileExplorerProps) {
                 }
                 
                 await storage.renameFile(file.path, newPath);
-                const meta = file.metadata || {};
-                await storage.updateMetadata(newPath, { metadata: { ...meta, isSource: true } });
-                alert(`Converted "${file.name}" to Source.`);
+                await storage.updateMetadata(newPath, { type: 'source', metadata: { ...currentMeta, isSource: true } });
+                
+                showAlert("Success", `Converted "${file.name}" to Source.`);
             }
         } catch (e: any) {
             console.error(e);
-            alert("Conversion failed: " + e.message);
+            showAlert("Error", "Conversion failed: " + e.message);
         }
     };
 
@@ -448,94 +479,162 @@ export default function FileExplorer(props: FileExplorerProps) {
         // Allow summarise for 'source' (PDFs) AND standard files
         if (file.type !== 'source' && file.type !== 'file') return;
         
-        if (!confirm(`Summarise ${file.name}? This will generate a new summary.${file.type==='source' ? ' If it is a PDF, text will be re-extracted.' : ''}`)) return;
+        const performSummarise = async () => {
+             setDialogAction(null); // Close confirm
+             try {
+                let contentToSummarize = "";
+                
+                // For Summarise, we prefer the CURRENT CONTENT of the file (editor view).
+                // Whether it's a Source (PDF wrapper) or Note, we read the Markdown.
+                // We do NOT go back to the PDF unless the file is empty or corrupted.
+                
+                const currentFile = await storage.getFile(file.path);
+                const currentContent = currentFile && typeof await storage.readFile(file.path) === 'string' 
+                     ? await storage.readFile(file.path) as string
+                     : null;
 
-        try {
-            let contentToSummarize = "";
+                if (currentContent) {
+                     // We have content. Use it.
+                     // Strip existing summary if present (it's usually a blockquote at top)
+                     contentToSummarize = currentContent;
+                     if (currentContent.trim().startsWith('> **Summary**:')) {
+                         const parts = currentContent.split('\n\n---\n\n');
+                         if (parts.length > 1) {
+                             // Use the part AFTER the separator
+                             contentToSummarize = parts.slice(1).join('\n\n---\n\n');
+                         } else {
+                             // Maybe just strip lines starting with >? 
+                             // Safer: Regex remove the specific header block.
+                             // For now, let's assume standard format.
+                         }
+                     }
+                } else if (file.type === 'source' || file.name.endsWith('.pdf')) {
+                    // Fallback: If no content, try to extract from PDF (First time?)
+                    console.log("No content found, attempting fresh extraction from PDF...");
+                     let pdfContent: ArrayBuffer | undefined;
+                     const originalPath = file.type === 'source' ? file.path.replace('.source.md', '') : file.path;
+                     const rawFile = await storage.readFile(originalPath);
+                     
+                     if (rawFile instanceof ArrayBuffer) {
+                         pdfContent = rawFile;
+                     } 
+                     
+                     if (pdfContent) {
+                        contentToSummarize = await extractTextFromPdf(pdfContent);
+                        const displayName = file.type === 'source' ? file.name.replace(' (Source)', '') : file.name;
+                        contentToSummarize = `## Source: ${displayName}\n\n${contentToSummarize}`; 
+                     }
+                }
 
-            if (file.type === 'source' || file.name.endsWith('.pdf')) {
-                 // PDF/Binary Logic
-                 let pdfContent: ArrayBuffer | undefined;
-                 
-                 // If it's a source file, the original is at path minus .source.md
-                 const originalPath = file.type === 'source' ? file.path.replace('.source.md', '') : file.path;
-                 
-                 const rawFile = await storage.readFile(originalPath);
-                 
-                 if (!rawFile) throw new Error("Original binary file not found.");
-                 
-                 if (rawFile instanceof ArrayBuffer) {
+                if (!contentToSummarize) throw new Error("No content available to summarise.");
+
+                // Call Summarizer
+                const res = await fetch('/api/ai/summarize', {
+                    method: 'POST',
+                    body: JSON.stringify({ content: contentToSummarize }),
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await res.json();
+                
+                let finalContent = contentToSummarize;
+                if (data.summary) {
+                    finalContent = `> **Summary**: ${data.summary}\n\n---\n\n${contentToSummarize}`;
+                }
+
+                // Save
+                await storage.saveFile(file.path, finalContent, undefined, file.tags, file.metadata);
+                
+                showAlert("Success", "Summarised successfully!");
+
+            } catch (e: any) {
+                 console.error("Summarise failed", e);
+                 showAlert("Error", "Failed: " + e.message);
+            }
+        };
+
+        setDialogAction({
+            type: 'confirm',
+            title: 'Summarise File',
+            message: `Summarise ${file.name}? This will generate a new summary based on the CURRENT text content.`,
+            confirmLabel: 'Summarise',
+            onConfirm: performSummarise
+        });
+    };
+
+    const handleResetSource = async (file: FileMeta) => {
+        if (file.type !== 'source') return;
+        
+        const performReset = async () => {
+             setDialogAction(null);
+             try {
+                // Logic mostly mirrors "Summarise" for Source/PDF
+                let pdfContent: ArrayBuffer | undefined;
+                
+                const originalPath = file.path.replace('.source.md', '');
+                const rawFile = await storage.readFile(originalPath);
+                
+                if (!rawFile) throw new Error("Original PDF file not found. Cannot reset.");
+                
+                if (rawFile instanceof ArrayBuffer) {
                      pdfContent = rawFile;
-                 } else if (typeof rawFile === 'string') {
+                } else if (typeof rawFile === 'string') {
                      throw new Error("Expected binary PDF, got text.");
-                 }
+                }
 
-                 if (!pdfContent) throw new Error("Could not read binary content.");
+                if (!pdfContent) throw new Error("Could not read binary content.");
 
-                 contentToSummarize = await extractTextFromPdf(pdfContent);
+                let content = await extractTextFromPdf(pdfContent);
                  
                  // Prepend Source Header
-                 const displayName = file.type === 'source' ? file.name.replace(' (Source)', '') : file.name;
-                 contentToSummarize = `## Source: ${displayName}\n\n${contentToSummarize}`; 
-            } else {
-                 // Standard File - Use Original if available?
-                 // Ideally we want to summarise the CURRENT content or ORIGINAL?
-                 // "Reset" option implies we might want original.
-                 // "Summarise" implies we summarise what we have or what works best.
-                 // If we have "originalContent" in metadata, that would be ideal for a clean summary.
-                 // But for now, let's grab the file content.
-                 
-                 // If metadata exists and has 'originalContent', maybe prefer that? 
-                 // But getting metadata here requires `storage.getFile` which we have in `file` (passed in).
-                 
-                 const fullFile = await storage.getFile(file.path);
-                 if (fullFile?.metadata?.originalContent) {
-                     contentToSummarize = fullFile.metadata.originalContent;
-                 } else {
-                     const raw = await storage.readFile(file.path);
-                     if (typeof raw !== 'string') throw new Error("File content is binary. Cannot summarise.");
-                     
-                     // Strip existing summary if present
-                     contentToSummarize = raw;
-                     if (raw.trim().startsWith('> **Summary**:')) {
-                         const parts = raw.split('\n\n---\n\n');
-                         if (parts.length > 1) contentToSummarize = parts.slice(1).join('\n\n---\n\n');
-                     }
-                 }
-            }
+                const displayName = file.name.replace(' (Source)', '');
+                content = `## Source: ${displayName}\n\n${content}`; 
+                
+                // Add Summary if we want to keep it? 
+                // Reset usually means "back to clean state".
+                // We could re-run summary? Or just give raw text.
+                // User said "reset the source to the 'original'/non edited".
+                // Original usually had a summary if we Auto-Summarized on upload.
+                // Let's re-run summary to be safe/nice? Or just raw.
+                // Let's keep raw + summary if possible, or just raw. 
+                // Simpler: Just raw text + header. User can click "Summarise" again if they want.
+                // Actually, "Original" implies what it was on upload. Upload does auto-summarise.
+                // Let's *try* to auto-summarise, effectively fully re-processing.
+                
+                try {
+                    const res = await fetch('/api/ai/summarize', {
+                        method: 'POST',
+                        body: JSON.stringify({ content }),
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    const data = await res.json();
+                    if (data.summary) {
+                        content = `> **Summary**: ${data.summary}\n\n---\n\n${content}`;
+                    }
+                } catch(e) {
+                    console.warn("Auto-summary failed during reset", e);
+                }
 
-            // Call Summarizer
-            const res = await fetch('/api/ai/summarize', {
-                method: 'POST',
-                body: JSON.stringify({ content: contentToSummarize }),
-                headers: { 'Content-Type': 'application/json' }
-            });
-            const data = await res.json();
-            
-            let finalContent = contentToSummarize;
-            if (data.summary) {
-                finalContent = `> **Summary**: ${data.summary}\n\n---\n\n${contentToSummarize}`;
-            }
+                // Save and CLEAR edited flag and CLEAR comments
+                const meta = file.metadata || {};
+                const newMeta = { ...meta, edited: false, comments: [] };
 
-            // Target Path
-            let targetPath = file.path;
-            if (file.name.endsWith('.pdf') && !file.path.endsWith('.source.md')) {
-                // If we are summarising a raw PDF (that wasn't a source yet?), make it a source
-                targetPath = `${file.path}.source.md`;
-            }
+                await storage.saveFile(file.path, content, undefined, file.tags, newMeta);
+                
+                showAlert("Success", "Source reset to original content.");
 
-            // Save with Metadata update if needed?
-            // If it was a generic file, we might mark it as having a summary.
-            // Ensure we don't lose existing metadata.
-            const existing = await storage.getFile(targetPath);
-            await storage.saveFile(targetPath, finalContent, undefined, existing?.tags, existing?.metadata);
-            
-            showAlert("Success", "Summarised successfully!");
+             } catch (e: any) {
+                 console.error("Reset failed", e);
+                 showAlert("Error", "Reset failed: " + e.message);
+             }
+        };
 
-        } catch (e: any) {
-             console.error("Summarise failed", e);
-             showAlert("Error", "Failed: " + e.message);
-        }
+        setDialogAction({
+            type: 'confirm',
+            title: 'Reset Source',
+            message: `Reset "${file.name}" to original? This will discard all edits and re-extract text from the PDF.`,
+            confirmLabel: 'Reset',
+            onConfirm: performReset
+        });
     };
 
     const handleSelectionClick = (item: FileMeta, index: number, event: React.MouseEvent) => {
@@ -708,16 +807,7 @@ export default function FileExplorer(props: FileExplorerProps) {
     };
 
 
-    const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
-    // ... existing handlers ...
-
-    // Close menu when clicking elsewhere
-    useEffect(() => {
-        const handleClickOutside = () => setActiveMenuId(null);
-        window.addEventListener('click', handleClickOutside);
-        return () => window.removeEventListener('click', handleClickOutside);
-    }, []);
 
     return (
         <div className={styles.modalOverlay} onClick={onClose}>
@@ -736,14 +826,14 @@ export default function FileExplorer(props: FileExplorerProps) {
                         opacity: currentPath === 'misc' ? 0 : 1,
                         background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: 4
                     }}>
-                        <ArrowLeft size={18} /> Back
+                        <Icon name="ArrowLeft" size={18} /> Back
                     </button>
                     
                     <button onClick={() => {
                         setIsBulkMode(!isBulkMode);
                         if (isBulkMode) setSelectedIds(new Set()); 
                     }} style={{ cursor: 'pointer', background: isBulkMode ? '#e6f7ff' : 'transparent', border: '1px solid #ccc', borderRadius: 4, padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
-                        {isBulkMode ? <CheckSquare size={16} /> : <Square size={16} />} Select
+                        {isBulkMode ? <Icon name="CheckSquare" size={16} /> : <Icon name="Square" size={16} />} Select
                     </button>
 
                     {isBulkMode && (
@@ -754,7 +844,7 @@ export default function FileExplorer(props: FileExplorerProps) {
 
                     {isBulkMode && selectedIds.size > 0 && (
                         <button onClick={handleBulkDelete} style={{ color: '#ef4444', cursor: 'pointer', background: 'none', border:'none', display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <Trash2 size={16} /> Delete ({selectedIds.size})
+                            <Icon name="Trash2" size={16} /> Delete ({selectedIds.size})
                         </button>
                     )}
 
@@ -777,17 +867,17 @@ export default function FileExplorer(props: FileExplorerProps) {
                                 showAlert("Sync", "Sync not available");
                             }
                         }} style={{ cursor: 'pointer', marginRight: '1rem', color: '#3b82f6', border: '1px solid #3b82f6', background: 'transparent', borderRadius: 4, padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <RefreshCw size={14} /> Sync Now
+                            <Icon name="RefreshCw" size={14} /> Sync Now
                         </button>
                     )}
                     <button onClick={handleCreateFolder} style={{ cursor: 'pointer', background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <FolderPlus size={18} /> New Topic
+                        <Icon name="FolderPlus" size={18} /> New Topic
                     </button>
                     <button onClick={() => setIsLinkDialogOpen(true)} style={{ cursor: 'pointer', background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <Link size={18} /> Add Link
+                        <Icon name="Link" size={18} /> Add Link
                     </button>
                     <button onClick={() => fileInputRef.current?.click()} style={{ cursor: 'pointer', background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <Upload size={18} /> Upload Logic
+                        <Icon name="Upload" size={18} /> Upload Logic
                     </button>
                     <input type="file" ref={fileInputRef} onChange={handleUpload} style={{ display: 'none' }} />
                 </div>
@@ -814,7 +904,7 @@ export default function FileExplorer(props: FileExplorerProps) {
                                 >
                                     {part === 'misc' ? 'Home' : part}
                                 </span>
-                                {!isLast && <ChevronRight size={14} style={{ color: '#999' }} />}
+                                {!isLast && <Icon name="ChevronRight" size={14} style={{ color: '#999' }} />}
                             </React.Fragment>
                          );
                      })}
@@ -869,6 +959,25 @@ export default function FileExplorer(props: FileExplorerProps) {
                                     </div>
                                 </>
                             )}
+                            {dialogAction && dialogAction.type === 'confirm' && (
+                                <>
+                                    <h3 style={{ margin: '0 0 1rem 0' }}>{dialogAction.title}</h3>
+                                    <p style={{ marginBottom: '1.5rem', whiteSpace: 'pre-wrap' }}>{dialogAction.message}</p>
+                                    <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+                                        <button onClick={() => setDialogAction(null)}>Cancel</button>
+                                        <button onClick={() => {
+                                            dialogAction.onConfirm();
+                                            // Dialog close handling is up to the caller usually? 
+                                            // But for consistent UI, we might want to auto-close if the caller doesn't?
+                                            // The caller of confirm usually sets state.
+                                            // But looking at performSummarise logic I added "setDialogAction(null)" inside.
+                                            // However, let's keep it safe.
+                                        }} style={{ background: '#007bff', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: 4 }}>
+                                            {dialogAction.confirmLabel || 'Confirm'}
+                                        </button>
+                                    </div>
+                                </>
+                            )}
                             {dialogAction && dialogAction.type === 'rename' && (
                                 <>
                                     <h3 style={{ margin: '0 0 1rem 0' }}>Rename File</h3>
@@ -912,6 +1021,11 @@ export default function FileExplorer(props: FileExplorerProps) {
                             onDragOver={(e) => item.type === 'folder' ? handleDragOver(e) : undefined}
                             onDrop={(e) => item.type === 'folder' ? handleDrop(e, item) : undefined}
                             onClick={(e) => handleRowClick(item, index, e)}
+                            style={{
+                                background: selectedIds.has(item.id) ? 'var(--accent)' : undefined,
+                                color: selectedIds.has(item.id) ? '#fff' : undefined, // Force white text on accent
+                                borderRadius: 6
+                            }}
                             onDoubleClick={() => {
                                 if (item.type === 'folder') {
                                     handleNavigate(item.name);
@@ -937,8 +1051,14 @@ export default function FileExplorer(props: FileExplorerProps) {
                                 )}
                                 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1 }}>
-                                    <span style={{ color: '#666', display: 'flex', alignItems: 'center' }}>
-                                        {item.type === 'folder' ? <Folder size={20} fill="currentColor" fillOpacity={0.2} /> : (item.type === 'source' ? <Book size={20} /> : <FileText size={20} />)}
+                                    <span style={{ color: selectedIds.has(item.id) ? 'currentColor' : '#666', display: 'flex', alignItems: 'center' }}>
+                                        {item.type === 'folder' ? 
+                                            <Icon name="Folder" size={20} fill="currentColor" fillOpacity={selectedIds.has(item.id) ? 0.3 : 0.2} /> : 
+                                            (item.type === 'source' ? 
+                                                (item.metadata?.edited ? <Icon name="BookOpen" size={20} /> : <Icon name="Book" size={20} />) : 
+                                                <Icon name="FileText" size={20} />
+                                            )
+                                        }
                                     </span>
                                     <span style={{ fontWeight: item.type === 'folder' ? 600 : 400 }}>{item.name}</span>
                                 </div>
@@ -950,11 +1070,11 @@ export default function FileExplorer(props: FileExplorerProps) {
                                     className={`${styles.kebabButton} ${activeMenuId === item.id ? styles.active : ''}`}
                                     onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === item.id ? null : item.id); }}
                                 >
-                                    <MoreVertical size={16} />
+                                    <Icon name="MoreVertical" size={16} />
                                 </button>
                                 
                                 {activeMenuId === item.id && (
-                                    <div className={styles.dropdownMenu} onClick={e => e.stopPropagation()}>
+                                    <div className={styles.dropdownMenu} onClick={e => e.stopPropagation()} style={{ left: 'auto', right: 0 }}>
                                         <button className={styles.dropdownItem} onClick={() => { setActiveMenuId(null); handleRenameClick(item); }}>
                                             Rename
                                         </button>
@@ -964,9 +1084,16 @@ export default function FileExplorer(props: FileExplorerProps) {
                                         </button>
 
                                         {item.type === 'source' ? (
-                                            <button className={styles.dropdownItem} onClick={() => { setActiveMenuId(null); handleToggleSourceStatus(item); }}>
-                                                Convert to Note
-                                            </button>
+                                            <>
+                                                {item.metadata?.edited && (
+                                                    <button className={styles.dropdownItem} onClick={() => { setActiveMenuId(null); handleResetSource(item); }}>
+                                                        Reset Source
+                                                    </button>
+                                                )}
+                                                <button className={styles.dropdownItem} onClick={() => { setActiveMenuId(null); handleToggleSourceStatus(item); }}>
+                                                    Convert to Note
+                                                </button>
+                                            </>
                                         ) : (
                                             <button className={styles.dropdownItem} onClick={() => { setActiveMenuId(null); handleToggleSourceStatus(item); }}>
                                                 Make Source
@@ -1098,7 +1225,7 @@ export default function FileExplorer(props: FileExplorerProps) {
                                     }
                                 }} style={{ padding: '4px 8px', color: 'white', background: 'red', fontWeight: 'bold', border: '1px solid darkred' }}>
                                    FACTORY RESET
-                                </button>
+                               </button>
                            </div>
                         </div>
                     </details>

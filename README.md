@@ -7,7 +7,34 @@
 
 ---
 
-## 🌿 The Philosophy: Paper, Sage, and Soul
+## 📜 The Meechi Manifesto: A Path of One’s Own
+
+### 1. The Digital Sanctuary
+Your thoughts are the most private thing you own. In an era where every keystroke is "mined" for training data, Meechi stands as a sanctuary. We believe that your self-reflection shouldn't be a product for a cloud provider; privacy is not a setting, it is our architecture.
+- **Zero-Cloud Intelligence**: Your "Sage" (AI) lives in your browser, not a server farm.
+- **Data Sovereignty**: You own the keys, the memory, and the path.
+
+### 2. Presence Over Achievement
+The name Meechi is rooted in the Japanese concept of Michi (道)—meaning "The Path" or "The Way". While other tools focus only on what you achieved, Meechi focuses on how you navigate your unique journey.
+- **The Journal is the Path**: Unlike static databases, Meechi treats your entries as a "Ship’s Log," keeping you on track and helping you navigate towards your personal goals.
+- **Reflection as a Mirror**: By mirroring your innermost feelings and aspirations, Meechi provides the clarity needed to navigate life's complexities.
+
+### 3. Intelligence Without the Tether
+We reject the idea that AI requires an internet connection to be "smart." A true companion should be there when you are offline, deep in thought, or away from the noise.
+- **Offline-First Resilience**: Built on Dexie.js, Meechi ensures you can journal, search, and browse your history without an internet connection.
+- **Zero-Lag Flow**: By running models locally, we eliminate "cloud lag," allowing your companion to react to your thoughts at the speed of your own mind.
+
+### 4. Bring Your Own (BYO) Soul
+Meechi is built for the individual who values autonomy. It is designed to be an extension of your own cognitive capabilities and a part of your consciousness.
+- **BYO Brain**: Use the AI models you trust, whether through private API keys or local LLMs.
+- **BYO Memory**: Connect your personal data—Google Drive, health logs, and research—to create a continuous narrative of personal growth.
+- **Untangling the Knot**: Meechi helps you process "raw material" from daily life, turning unprocessed experience into documented wisdom.
+
+> "Meechi: Documenting the Path of You."
+
+---
+
+## 🌿 The Design Philosophy: Paper, Sage, and Soul
 
 In a digital world of stark screens and cold logic, Meechi offers a sanctuary.
 -   **Paper & Sage**: The interface is grounded in the organic tones of warm paper (#F9F7F2) and calming sage (#6B8E6B), creating a space where long-form writing feels natural and safe.
@@ -67,7 +94,7 @@ Meechi is built with the latest web technologies to ensure speed, privacy, and r
 | **Vectors** | **TensorFlow.js** + USE | In-browser semantic search (Local RAG). |
 | **Local AI** | **WebLLM** (MLC-AI) | Client-side Llama 3 inference (WebGPU). |
 | **Server AI** | Vercel AI SDK (Gemini/Groq) | Optional cloud fallback for heavy reasoning. |
-| **Styling** | **Tailwind CSS v3** | variables-based theming engine. |
+| **Styling** | **Tailwind CSS v3** + OKLCH | Dynamic variables-based theming engine. |
 
 ---
 

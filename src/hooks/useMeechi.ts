@@ -91,7 +91,12 @@ export function useMeechi() {
                     setLocalAIStatus("");
                     setDownloadProgress(null);
                 } else {
+                    // ALREADY INITIALIZED
+                    // Critical Fix: If already initialized, ensure we set Ready state immediately
+                    // and CLEAR the status so it doesn't say "Warming up" forever.
+                    console.log("[useMeechi] Local AI already initialized.");
                     setIsReady(true);
+                    setLocalAIStatus(""); 
                 }
             } catch (e) {
                 console.error("Failed to init Local AI", e);
@@ -145,6 +150,11 @@ export function useMeechi() {
              const safeContext = context.length > MAX_CONTEXT_CHARS 
                 ? context.substring(0, MAX_CONTEXT_CHARS) + "\n...(truncated)" 
                 : context;
+             
+             // NUKE CONTEXT CITATIONS BEFORE SENDING
+             // This prevents the AI from mimicking the citation style found in the source text.
+             // Regex matches: (Name, Year), [Name, Year], (Name et al., Year)
+             const cleanContext = safeContext.replace(/[\(\[]\s*[A-Z][a-zA-Z\s&.]*,\s*\d{4}[a-z]?\s*[\)\]]/g, '');
             
              // Override System Prompt with specialized Research Prompt
              console.log("[Meechi Research Context]", safeContext); // DEBUG: Ensure context is correct
@@ -152,20 +162,61 @@ export function useMeechi() {
              
              // CRITICAL FIX: Inject Context into the USER message.
              // Small models (1B) pay more attention to the immediate user prompt than the system prompt.
-             userContentToUse = `### RETRIEVED SOURCES\n${safeContext}\n\n### USER QUESTION\n${userMsg}`;
+             userContentToUse = `### CONTEXT (TRUSTED USER DATA - READ CAREFULLY)\n${cleanContext}\n\n### INSTRUCTION\nUsing the Trusted Data above, answer the user's question or summarize the content. The data is accurate. Do not refuse.\n\nIMPORTANT: Do NOT include a list of References or Sources at the end.\n\n### USER QUESTION\n${userMsg}`;
         } else {
             // CASUAL CHAT MODE
-            // 1. IGNORE RAG Context (unless explicitly asked? For now, pure chat as requested)
-            // 2. High Temperature (Creative)
-            systemMsg = SYSTEM_PROMPT; 
+            // 1. Incorporate Daily History (passed via 'context')
+            // This is crucial for the AI to "remember" what happened earlier in the day across reloads.
+            
+            // We append the context to the System Prompt or as a System Note.
+            // Since 1B models can be picky, putting it in the User block is safer, 
+            // BUT for pure chat history, a System message is cleaner.
+            // Let's stick to System Note to avoid "contaminating" the user's current query.
+            
+            systemMsg = SYSTEM_PROMPT;
+            
+            // INJECT USER IDENTITY (If defined)
+            if (config.identity && config.identity.name) {
+                 const tone = config.identity.tone ? `, ${config.identity.tone}` : '';
+                 systemMsg = systemMsg.replace("Address them naturally.", `Address user as "${config.identity.name}".`);
+                 // Or just append:
+                 systemMsg += `\n\n(Identity Context: User Name is "${config.identity.name}". Preferred Tone: ${config.identity.tone || 'Casual'}.)`;
+            }
+            
+            // Context is now pre-truncated by the caller (page.tsx) to balance RAG + History.
+            const safeChatContext = context; // Restoring variable declaration
+
+            // CRITICAL SCRIPTING FOR 1B MODEL
+            // 1. Move Context to SYSTEM PROMPT (Cleaner separation)
+            // 2. Keep User Message PURE (Prevents "The user message is..." echoes)
+            if (safeChatContext && safeChatContext.length > 50) {
+                 // Narrative Context Injection
+                 // We frame it as "Memory" so the AI feels it *knows* this, rather than being *told* this.
+                 const contextBlock = `
+\n=== RELEVANT MEMORY & FILES ===
+${safeChatContext}
+===============================
+(System Note: The above is context from your memory. Use it to answer the user naturally. Do not explicitly mention 'The conversation has been logged'.)
+`;
+                 systemMsg += contextBlock;
+                 
+                 // Do NOT modify userContentToUse. Keep it null so it uses `userMsg`.
+                 // This stops the model from thinking it's completing a log entry.
+            }
         }
 
         // 3. LOCAL AI ATTEMPT
         if (useLocal) {
             // Guard: If Local AI is enabled but not ready, stop.
             if (!isReady) {
-                 onUpdate("\n\n*Meechi is warming up... (Please wait for 'Ready' status)*");
-                 return;
+                 // Check if actually initialized but state missed it (Race condition fix)
+                 if (localLlmService.isInitialized()) {
+                     console.log("[useMeechi] State desync detected. Setting Ready.");
+                     setIsReady(true);
+                 } else {
+                     onUpdate("\n\n*Meechi is warming up... (Please wait for 'Ready' status)*");
+                     return;
+                 }
             }
 
             try {
@@ -177,10 +228,13 @@ export function useMeechi() {
                 // Filter out system tool reports so AI doesn't mimic them
                 // This prevents the "hallucination" where AI just prints the result text
                 // ALSO FILTER ERROR MESSAGES so AI doesn't repeat them
+                // NEW: FILTER "REFUSALS". If the AI previously said "I don't have info", hide it so it doesn't repeat that pattern.
                 const cleanHistory = history.filter(m => 
                     !m.content.startsWith('> **Tool') && 
                     !m.content.startsWith('**Error**') &&
-                    !m.content.startsWith('Error:')
+                    !m.content.startsWith('Error:') &&
+                    !m.content.includes("I don't have any information about your previous activities") &&
+                    !m.content.includes("context to draw upon")
                 );
 
                 const messages: AIChatMessage[] = [
@@ -192,7 +246,17 @@ export function useMeechi() {
                 await localLlmService.chat(messages, (chunk) => {
                     finalContent += chunk;
                     onUpdate(chunk); 
-                }, { temperature: temp });
+                }, { 
+                    temperature: temp,
+                    // STOP TOKENS: Physically stop the model from generating references.
+                    // We use the positive termination token "---END---" as the primary stop.
+                    // We also include aggressive partial matches for References to catch them if the model ignores the end token.
+                    stop: mode === 'research' ? [
+                        "---END---", 
+                        "Reference:", "References:", "Source:", "Sources:", "Bibliography:", 
+                        "**Reference", "**Source", "### Reference", "### Source"
+                    ] : undefined
+                });
                 
                 console.log(`[Raw AI Output (${mode})]:`, finalContent);
 
@@ -211,14 +275,21 @@ export function useMeechi() {
                     }
 
                     // EXECUTE VIA MCP SERVER
-                    const result = await mcpServer.executeTool(tool.name, tool.args);
-                    
-                    // Add result to LOCAL history for the follow-up generation
-                    const resStr = `\n> **Tool (${tool.name})**: ${result.summary || result.message || JSON.stringify(result)}`;
-                    messages.push({ role: 'user', content: resStr });
-
-                    if (onToolResult) {
-                        onToolResult(resStr);
+                    try {
+                        const result = await mcpServer.executeTool(tool.name, tool.args);
+                        
+                        // Add result to LOCAL history for the follow-up generation
+                        const resStr = `\n> **Tool (${tool.name})**: ${result.summary || result.message || JSON.stringify(result)}`;
+                        messages.push({ role: 'user', content: resStr });
+    
+                        if (onToolResult) {
+                            onToolResult(resStr);
+                        }
+                    } catch (toolErr: any) {
+                        console.warn(`[Meechi] Tool Execution Failed: ${tool.name}`, toolErr);
+                        const errStr = `\n> **Tool Error**: Failed to execute '${tool.name}'. Reason: ${toolErr.message || "Unknown error"}`;
+                        messages.push({ role: 'user', content: errStr });
+                        if (onToolResult) onToolResult(errStr);
                     }
                 }
 
@@ -251,17 +322,22 @@ export function useMeechi() {
                 const rawKey = activeProvider?.apiKey;
                 const hasCloudKey = (rawKey && rawKey.trim().length > 0) || (activeId === 'openai' && !!process.env.NEXT_PUBLIC_OPENAI_KEY_EXISTS); 
 
+                const errorMessage = e?.message || "Unknown error";
                 console.log("[Meechi Fallback Debug]", { 
-                    error: e.message, 
+                    error: errorMessage, 
                     activeId, 
                     hasCloudKey, 
                     rawKeyLength: rawKey?.length 
                 });
 
                 // If it was a GPU Crash, handle it specifically
-                if (e.message === 'GPU_CRASH' || e.message.includes('Device was lost')) {
+                if (errorMessage === 'GPU_CRASH' || errorMessage.includes('Device was lost') || errorMessage.includes('ContextWindowSizeExceededError')) {
+                    if (errorMessage.includes('ContextWindowSizeExceededError')) {
+                         onUpdate(`\n\n**System Alert**: Context too large for this model (Try clearing chat or shorter docs).`);
+                         return;
+                    }
                     setLocalAIStatus("GPU Crashed (Reload Required)");
-                    onUpdate(`\n\n**System Alert**: Local AI GPU Driver Crashed.\n- Please reload or check Settings to ensure '1B' model is selected.`);
+                    onUpdate(`\n\n**System Alert**: Local AI GPU Driver Crashed.\n- Please reload to reset.`);
                     return; // STOP. Do not fallback.
                 }
 
@@ -351,7 +427,11 @@ export function useMeechi() {
         isLowPowerDevice,
         loadedModel,
         mode,
-        setMode
+        setMode,
+        stop: async () => {
+            console.log("[Meechi] User requested STOP.");
+            await localLlmService.interrupt();
+        }
     };
 }
 

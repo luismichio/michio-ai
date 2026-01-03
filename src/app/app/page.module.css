@@ -656,14 +656,16 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   border: 1px solid var(--border);
 
-  max-width: 300px;
-  /* Fixed pos handled inline by JS */
+  /* Width and position handled inline by JS */
   pointer-events: auto;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   font-family: var(--font-sans);
   z-index: 10000;
+
+  /* Constrain height for long comments */
+  max-height: 400px;
 }
 
 .commentHeader {
@@ -695,22 +697,57 @@
   background: rgba(0, 0, 0, 0.02);
 }
 
-.commentActionBtn {
-  border: none;
-  background: none;
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  color: var(--secondary);
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .commentActionBtn:hover {
   background: var(--overlay);
   color: var(--foreground);
 }
-.spin { animation: spin 1s linear infinite; }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+
+/* Floating Menu (Selection Menu) */
+.floatingMenu {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background-color: var(--surface);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  padding: 0.4rem 0.8rem;
+  z-index: 10000;
+  pointer-events: auto;
+}
+
+.floatingMenu button {
+  background: none;
+  border: 1px solid transparent;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  border-radius: 4px;
+  color: var(--foreground);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+}
+
+.floatingMenu button:hover {
+  background: var(--overlay);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Sidebar icons handled inline in SourceEditor.tsx *//* Force Reload */

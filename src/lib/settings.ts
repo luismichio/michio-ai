@@ -20,12 +20,20 @@ export interface LocalAIConfig {
     model: string;
 }
 
+export interface AppearanceConfig {
+    fontFamily: string; // e.g. "Inter", "Lora", "Mono", or custom URL
+    accentColor: string; // Hex
+    radius: string; // Tailwind/CSS value e.g. "0.5rem"
+    iconLibrary: 'lucide' | 'material' | 'custom';
+}
+
 export interface AppConfig {
     identity: UserIdentity;
     providers: AIProviderConfig[];
     activeProviderId: string;
     localAI: LocalAIConfig;
     theme: 'light' | 'dark' | 'system';
+    appearance: AppearanceConfig;
 }
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -46,7 +54,13 @@ const DEFAULT_CONFIG: AppConfig = {
         enabled: true,
         model: 'Llama-3.2-1B-Instruct-q4f16_1-MLC' // Default to 1B (Stable)
     },
-    theme: 'system'
+    theme: 'system',
+    appearance: {
+        fontFamily: 'Lora',
+        accentColor: '#6B8E6B', // Sage
+        radius: '0.5rem',
+        iconLibrary: 'lucide'
+    }
 };
 
 const CONFIG_PATH = 'core/config.json';

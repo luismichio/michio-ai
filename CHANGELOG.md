@@ -1,6 +1,20 @@
 
 ## Changelog
 
+
+### v1.1.0 - The Color & Personality Update (Jan 2026)
+*   **Theme Harmonization (OKLCH Engine)**:
+    *   **True Color Science**: Implemented a mathematical color engine (`src/lib/colors.ts`) that converts user Hex input to the OKLCH color space for superior perceptual uniformity.
+    *   **Harmonious UI**: The Accent color now flows through the entire app, tinting the **Topic Explorer selection** and **Model Loading Bar**.
+    *   **Stop Button**: Added a manual "Stop Generation" button with a spinning ring animation. Its "Destructive Red" color is dynamically calculated to match the exact Lightness and Chroma of your chosen Accent.
+*   **Personality Upgrade**:
+    *   **"Wise Peer" Integration**: Overhauled the System Prompt to adopt a warmer, more creative tone, shedding the robotic "I have logged..." meta-commentary.
+    *   **Identity Injection**: The AI now actively reads your **Name & Tone Preferences** from Settings and addresses you personally.
+    *   **Context Narratives**: Fixed 1B model hallucinations by framing past logs as "Internal Memory" rather than external context instructions.
+*   **Fixes**:
+    *   **Log Mode**: Fixed a bug where "Log Mode" triggered a "Thinking..." state. It now acts purely as a Journal.
+    *   **1B Model Stability**: Simplified prompts to prevent the model from getting lost in history context.
+
 ### v0.9.98 - The Writer's Studio (Jan 2026)
 *   **Notion-Like Editor**: A complete overhaul of the writing experience.
     *   **Slash Commands**: Type `/` to instantly insert Headings, Lists, Quotes, Code Blocks, and Dividers.

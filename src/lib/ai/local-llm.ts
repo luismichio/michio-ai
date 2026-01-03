@@ -108,7 +108,7 @@ export class WebLLMService {
     async chat(
         messages: AIChatMessage[],
         onUpdate: (chunk: string) => void,
-        options: { tools?: AITool[]; temperature?: number; top_p?: number } = {}
+        options: { tools?: AITool[]; temperature?: number; top_p?: number; stop?: string[] } = {}
     ): Promise<string> {
         if (!this.engine) {
             throw new Error("Local Engine not initialized");
@@ -126,6 +126,8 @@ export class WebLLMService {
                 stream: true,
                 temperature: options.temperature ?? 0.7, 
                 top_p: options.top_p ?? 0.9,
+                stop: options.stop,
+                frequency_penalty: 0.1, // Slight penalty to prevent infinite loops "The user has asked..."
             });
 
             for await (const chunk of completion) {
@@ -165,6 +167,12 @@ export class WebLLMService {
 
     getModelId() {
         return this.currentModelId;
+    }
+
+    async interrupt() {
+        if (this.engine) {
+            await this.engine.interruptGenerate();
+        }
     }
 }
 

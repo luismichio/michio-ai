@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import styles from '../page.module.css';
+import styles from '@/app/app/page.module.css';
 
 interface Props {
     onClose: () => void;

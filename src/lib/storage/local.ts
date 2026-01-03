@@ -17,19 +17,35 @@ export class LocalStorageProvider implements StorageProvider {
     }
 
     async indexFile(path: string, content: string) {
-        // Only index text-based files in knowledge base (misc/ or source files)
-        const isKnowledge = path.startsWith('misc/') || path.endsWith('.source.md');
+        // Only index text-based files in knowledge base (misc/ or source files) AND history logs
+        const isKnowledge = path.startsWith('misc/') || path.endsWith('.source.md') || path.startsWith('history/');
         if (!isKnowledge) return;
 
         try {
             console.log(`[RAG] Indexing ${path}...`);
-            // 1. Clear old chunks for this file
+            // 2. Fetch metadata to include comments in indexing
+            const file = await db.files.get(path);
+            const comments = file?.metadata?.comments || [];
+            
+            let fullText = content;
+            if (comments.length > 0) {
+                const commentText = comments
+                    .filter((c: any) => c.text?.trim()) // Only include non-empty comments
+                    .map((c: any) => c.text)
+                    .join('\n');
+                
+                if (commentText) {
+                    fullText += "\n\n### User Notes & Comments\n" + commentText;
+                }
+            }
+
+            // 4. Clear old chunks for this file
             await db.chunks.where('filePath').equals(path).delete();
 
-            // 2. Chunk text
-            const chunks = chunkText(content);
+            // 5. Chunk text
+            const chunks = chunkText(fullText);
             
-            // 3. Generate embeddings and save
+            // 6. Generate embeddings and save
             for (const text of chunks) {
                 const embedding = await generateEmbedding(text);
                 await db.chunks.add({
@@ -107,7 +123,7 @@ export class LocalStorageProvider implements StorageProvider {
                 path: virtualPath,
                 content: content,
                 updatedAt: Date.now(),
-                type: 'file',
+                type: virtualPath.endsWith('.source.md') ? 'source' : 'file',
                 remoteId: remoteId || existing?.remoteId, // Preserve remoteId if updating content locally
                 dirty: 1, // Mark as dirty (needs sync up)
                 deleted: 0,
@@ -121,16 +137,20 @@ export class LocalStorageProvider implements StorageProvider {
         }
     }
 
-    async updateMetadata(virtualPath: string, updates: { tags?: string[], metadata?: any }): Promise<void> {
+    async updateMetadata(virtualPath: string, updates: Partial<FileMeta>): Promise<void> {
+        console.log('[Storage] updateMetadata called for:', virtualPath);
+        console.log('[Storage] Updates:', updates);
         await db.transaction('rw', db.files, async () => {
              const existing = await db.files.get(virtualPath);
              if (!existing) throw new Error(`File not found: ${virtualPath}`);
 
+             console.log('[Storage] Existing file found, updating...');
              await db.files.update(virtualPath, {
                  ...updates,
                  updatedAt: Date.now(),
                  dirty: 1
              });
+             console.log('[Storage] Database updated successfully');
         });
     }
 
@@ -208,8 +228,9 @@ export class LocalStorageProvider implements StorageProvider {
         let logs = "";
 
         // 1. If window crosses midnight (start time is yesterday), read yesterday's log first
+        let yesterdayContent = null;
         if (startTime.getDate() !== now.getDate()) {
-            const yesterdayContent = await this.readFile(`history/${yesterdayStr}.md`);
+            yesterdayContent = await this.readFile(`history/${yesterdayStr}.md`);
             if (typeof yesterdayContent === 'string') {
                 logs += this.filterLogByTime(yesterdayContent, startTime, yesterdayDate) + "\n";
             }
@@ -220,6 +241,8 @@ export class LocalStorageProvider implements StorageProvider {
         if (typeof todayContent === 'string') {
             logs += this.filterLogByTime(todayContent, startTime, todayDate);
         }
+        
+        console.log(`[Storage] getRecentLogs for ${limitHours}h. Files: ${yesterdayStr}(${typeof yesterdayContent}), ${todayStr}(${typeof todayContent}). Total Len: ${logs.length}`);
 
         return logs || "No recent history.";
     }
@@ -235,8 +258,9 @@ export class LocalStorageProvider implements StorageProvider {
         for (const block of blocks) {
             if (!block.trim()) continue;
 
-            // Extract Time: " 10:30:05 PM\n**User**..."
-            const timeMatch = block.match(/^\s*(\d{1,2}:\d{2}:\d{2}\s?(?:AM|PM)?)/i);
+            // Extract Time: " 10:30:05 PM", " 10:30 PM", or "22:30"
+            // Regex: support optional seconds (?::\d{2})?
+            const timeMatch = block.match(/^\s*(\d{1,2}:\d{2}(?::\d{2})?\s?(?:AM|PM)?)/i);
             if (timeMatch) {
                 const timeStr = timeMatch[1];
                 
@@ -244,6 +268,9 @@ export class LocalStorageProvider implements StorageProvider {
                 const entryDate = new Date(fileDate);
                 const [time, modifier] = timeStr.trim().split(' ');
                 let [hours, minutes, seconds] = time.split(':').map(Number);
+                
+                // Handle optional seconds
+                if (isNaN(seconds)) seconds = 0;
                 
                 if (modifier) {
                     if (modifier.toUpperCase() === 'PM' && hours < 12) hours += 12;

@@ -39,6 +39,8 @@ export default function SettingsPage() {
         setSaveStatus('saving');
         try {
             await settingsManager.saveConfig(config);
+            // Dispatch event for ThemeProvider
+            window.dispatchEvent(new Event('meechi-appearance-update'));
             setSaveStatus('saved');
             setTimeout(() => setSaveStatus('idle'), 2000);
         } catch (e) {
@@ -81,8 +83,90 @@ export default function SettingsPage() {
         <div style={{ maxWidth: 800, margin: '0 auto', padding: '2rem', fontFamily: 'sans-serif' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
                 <h1 style={{ margin: 0 }}>Settings</h1>
-                <Link href="/" style={{ textDecoration: 'none', color: '#666', fontSize: '0.9rem' }}>← Back to Chat</Link>
+                <Link href="/app" style={{ textDecoration: 'none', color: '#666', fontSize: '0.9rem' }}>← Back to Chat</Link>
             </div>
+
+            <section style={sectionStyle}>
+                <h2 style={headerStyle}>Appearance</h2>
+                
+                {/* Font Family */}
+                <div style={fieldGroupStyle}>
+                    <label style={labelStyle}>Font Family</label>
+                    <select 
+                        style={inputStyle} 
+                        value={config.appearance?.fontFamily || 'Inter'}
+                        onChange={e => setConfig({ 
+                            ...config, 
+                            appearance: { ...config.appearance, fontFamily: e.target.value } 
+                        })}
+                    >
+                        <option value="Inter">Inter (Clean)</option>
+                        <option value="Lora">Lora (Serif)</option>
+                        <option value="Mono">Monospace (Code)</option>
+                    </select>
+                </div>
+
+                {/* Accent Color */}
+                <div style={fieldGroupStyle}>
+                    <label style={labelStyle}>Accent Color</label>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                         <input 
+                            type="color" 
+                            value={config.appearance?.accentColor || '#6B8E6B'} 
+                            onChange={e => setConfig({ 
+                                ...config, 
+                                appearance: { ...config.appearance, accentColor: e.target.value } 
+                            })}
+                            style={{ width: 40, height: 40, padding: 0, border: 'none', background: 'none' }}
+                         />
+                         <input 
+                            style={{ ...inputStyle, width: 100 }}
+                            value={config.appearance?.accentColor || '#6B8E6B'}
+                            onChange={e => setConfig({ 
+                                ...config, 
+                                appearance: { ...config.appearance, accentColor: e.target.value } 
+                            })} 
+                         />
+                    </div>
+                </div>
+
+                {/* Icon Library */}
+                 <div style={fieldGroupStyle}>
+                    <label style={labelStyle}>Icon Library</label>
+                    <select 
+                        style={inputStyle} 
+                        value={config.appearance?.iconLibrary || 'lucide'}
+                        onChange={e => setConfig({ 
+                            ...config, 
+                            appearance: { ...config.appearance, iconLibrary: e.target.value as any } 
+                        })}
+                    >
+                        <option value="lucide">Lucide (Default)</option>
+                        <option value="material">Material Design (Coming Soon)</option>
+                        <option value="custom">Custom (Coming Soon)</option>
+                    </select>
+                </div>
+
+                {/* Radius */}
+                <div style={fieldGroupStyle}>
+                    <label style={labelStyle}>Corner Radius</label>
+                    <select 
+                        style={inputStyle} 
+                        value={config.appearance?.radius || '0.5rem'}
+                        onChange={e => setConfig({ 
+                            ...config, 
+                            appearance: { ...config.appearance, radius: e.target.value } 
+                        })}
+                    >
+                        <option value="0rem">Sharp (0px)</option>
+                        <option value="0.25rem">Small (4px)</option>
+                        <option value="0.5rem">Medium (8px)</option>
+                        <option value="1rem">Large (16px)</option>
+                        <option value="9999px">Round</option>
+                    </select>
+                </div>
+
+            </section>
 
             <section style={sectionStyle}>
                 <h2 style={headerStyle}>Identity</h2>

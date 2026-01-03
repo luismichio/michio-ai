@@ -59,7 +59,7 @@ export class GoogleDriveClient {
     async listFiles(query: string) {
         const params = new URLSearchParams({
             q: query,
-            fields: 'files(id, name, mimeType, parents, modifiedTime, version, trashed, capabilities)',
+            fields: 'files(id, name, mimeType, parents, modifiedTime, version, trashed, capabilities, appProperties)',
             pageSize: '1000', 
         });
         
@@ -81,7 +81,7 @@ export class GoogleDriveClient {
     async listChanges(pageToken: string) {
         const params = new URLSearchParams({
             pageToken,
-            fields: 'nextPageToken, newStartPageToken, changes(fileId, removed, file(id, name, mimeType, parents, modifiedTime, version, trashed))',
+            fields: 'nextPageToken, newStartPageToken, changes(fileId, removed, file(id, name, mimeType, parents, modifiedTime, version, trashed, appProperties))',
         });
         const res = await this.request(`changes?${params.toString()}`);
         return await res.json();
@@ -107,7 +107,7 @@ export class GoogleDriveClient {
      * Get file metadata
      */
     async getFileMetadata(fileId: string) {
-        const res = await this.request(`files/${fileId}?fields=id,name,parents,mimeType,modifiedTime,trashed`);
+        const res = await this.request(`files/${fileId}?fields=id,name,parents,mimeType,modifiedTime,trashed,appProperties`);
         return await res.json();
     }
 
@@ -116,13 +116,14 @@ export class GoogleDriveClient {
      */
 
 
-    async updateMetadata(fileId: string, metadata: { name?: string, addParents?: string[], removeParents?: string[] }) {
+    async updateMetadata(fileId: string, metadata: { name?: string, addParents?: string[], removeParents?: string[], appProperties?: Record<string, string> }) {
         const url = new URL(`https://www.googleapis.com/drive/v3/files/${fileId}`);
         if (metadata.addParents) url.searchParams.append('addParents', metadata.addParents.join(','));
         if (metadata.removeParents) url.searchParams.append('removeParents', metadata.removeParents.join(',')); // Important: remove old parents for move
 
         const body: any = {};
         if (metadata.name) body.name = metadata.name;
+        if (metadata.appProperties) body.appProperties = metadata.appProperties;
 
         const res = await this.request(url.toString().replace('https://www.googleapis.com/drive/v3/', ''), { // request prepends base
             method: 'PATCH',
@@ -156,7 +157,7 @@ export class GoogleDriveClient {
     /**
      * Create file
      */
-    async createFile(name: string, folderId: string | null, content: string | Blob | ArrayBuffer) {
+    async createFile(name: string, folderId: string | null, content: string | Blob | ArrayBuffer, appProperties?: Record<string, string>) {
         let mimeType = 'application/octet-stream';
         if (name.endsWith('.md')) mimeType = 'text/markdown';
         else if (name.endsWith('.txt')) mimeType = 'text/plain';
@@ -164,13 +165,11 @@ export class GoogleDriveClient {
 
         const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
 
-        const metadata = {
+        const metadata: any = {
             name,
             parents: folderId ? [folderId] : [],
-            // mimeType: mimeType // Don't set folder mimeType here obviously, but file mimeType is inferred from content usually? 
-            // Actually for files, we don't strictly need to set it in metadata if we set it in upload body?
-            // But good practice.
         };
+        if (appProperties) metadata.appProperties = appProperties;
 
         const form = new FormData();
         form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));

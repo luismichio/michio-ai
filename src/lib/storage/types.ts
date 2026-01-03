@@ -35,7 +35,7 @@ export interface StorageProvider {
      */
     saveFile(virtualPath: string, content: string | Blob | ArrayBuffer, remoteId?: string, tags?: string[], metadata?: any): Promise<void>;
 
-    updateMetadata(virtualPath: string, updates: { tags?: string[], metadata?: any }): Promise<void>;
+    updateMetadata(virtualPath: string, updates: Partial<FileMeta>): Promise<void>;
     getFilesByTag(tag: string): Promise<FileMeta[]>;
 
     /**

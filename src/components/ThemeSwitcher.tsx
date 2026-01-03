@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Moon, Sun, Monitor } from "lucide-react";
+import Icon from "@/components/Icon";
 import { useTheme } from "next-themes";
 
 export function ThemeSwitcher() {
@@ -21,29 +21,29 @@ export function ThemeSwitcher() {
       <button
         onClick={() => setTheme("light")}
         className={`p-1.5 rounded-full transition-colors ${
-          theme === 'light' ? 'bg-sage-500 text-white' : 'text-zinc-400 hover:text-white'
+          theme === 'light' ? 'bg-accent text-white' : 'text-zinc-400 hover:text-accent'
         }`}
         title="Light Mode"
       >
-        <Sun size={16} />
+        <Icon name="Sun" size={16} />
       </button>
       <button
         onClick={() => setTheme("system")}
         className={`p-1.5 rounded-full transition-colors ${
-          theme === 'system' ? 'bg-sage-500 text-white' : 'text-zinc-400 hover:text-white'
+          theme === 'system' ? 'bg-accent text-white' : 'text-zinc-400 hover:text-accent'
         }`}
         title="System Mode"
       >
-        <Monitor size={16} />
+        <Icon name="Monitor" size={16} />
       </button>
       <button
         onClick={() => setTheme("dark")}
         className={`p-1.5 rounded-full transition-colors ${
-          theme === 'dark' ? 'bg-sage-500 text-white' : 'text-zinc-400 hover:text-white'
+          theme === 'dark' ? 'bg-accent text-white' : 'text-zinc-400 hover:text-accent'
         }`}
         title="Dark Mode"
       >
-        <Moon size={16} />
+        <Icon name="Moon" size={16} />
       </button>
     </div>
   );
