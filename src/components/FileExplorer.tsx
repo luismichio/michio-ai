@@ -816,15 +816,16 @@ export default function FileExplorer(props: FileExplorerProps) {
                 {/* Header ... (unchanged) */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                     <h2 style={{ fontSize: '1.5rem', fontWeight: 600 }}>Topic Explorer</h2>
-                    <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer' }}>×</button>
+                    <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: 'var(--foreground)' }}>×</button>
                 </div>
 
                 {/* Toolbar ... (unchanged) */}
-                <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', paddingBottom: '1rem', borderBottom: '1px solid #eee', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
                     <button onClick={handleBack} disabled={currentPath === 'misc'} style={{  
                         cursor: currentPath === 'misc' ? 'default' : 'pointer', 
                         opacity: currentPath === 'misc' ? 0 : 1,
-                        background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: 4
+                        background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: 4,
+                        color: 'var(--foreground)'
                     }}>
                         <Icon name="ArrowLeft" size={18} /> Back
                     </button>
@@ -832,7 +833,13 @@ export default function FileExplorer(props: FileExplorerProps) {
                     <button onClick={() => {
                         setIsBulkMode(!isBulkMode);
                         if (isBulkMode) setSelectedIds(new Set()); 
-                    }} style={{ cursor: 'pointer', background: isBulkMode ? '#e6f7ff' : 'transparent', border: '1px solid #ccc', borderRadius: 4, padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    }} style={{ 
+                        cursor: 'pointer', 
+                        background: isBulkMode ? 'var(--info)' : 'transparent', 
+                        color: isBulkMode ? 'var(--surface)' : 'var(--foreground)',
+                        border: '1px solid var(--border)', 
+                        borderRadius: 4, padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4 
+                    }}>
                         {isBulkMode ? <Icon name="CheckSquare" size={16} /> : <Icon name="Square" size={16} />} Select
                     </button>
 
@@ -843,7 +850,7 @@ export default function FileExplorer(props: FileExplorerProps) {
                     )}
 
                     {isBulkMode && selectedIds.size > 0 && (
-                        <button onClick={handleBulkDelete} style={{ color: '#ef4444', cursor: 'pointer', background: 'none', border:'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <button onClick={handleBulkDelete} style={{ color: 'var(--error)', cursor: 'pointer', background: 'none', border:'none', display: 'flex', alignItems: 'center', gap: 4 }}>
                             <Icon name="Trash2" size={16} /> Delete ({selectedIds.size})
                         </button>
                     )}
@@ -854,7 +861,7 @@ export default function FileExplorer(props: FileExplorerProps) {
                             await storage.resetSyncState();
                             alert("Sync Reset. Please Sign Out and Sign In again to refresh permissions.");
                         }
-                    }} style={{ cursor: 'pointer', marginRight: '1rem', color: '#ef4444', border: '1px solid #ef4444', background: 'transparent', borderRadius: 4, padding: '4px 8px', fontSize: '0.8rem' }}>
+                    }} style={{ cursor: 'pointer', marginRight: '1rem', color: 'var(--error)', border: '1px solid var(--error)', background: 'transparent', borderRadius: 4, padding: '4px 8px', fontSize: '0.8rem' }}>
                         Reset Cloud
                     </button>
                     {props.syncLogs && (
@@ -862,28 +869,29 @@ export default function FileExplorer(props: FileExplorerProps) {
                             if (storage.forceSync) {
                                 await storage.forceSync();
                                 await storage.forceSync();
+                                await storage.forceSync(); // Triple sync hack
                                 showAlert("Sync", "Sync triggered!");
                             } else {
                                 showAlert("Sync", "Sync not available");
                             }
-                        }} style={{ cursor: 'pointer', marginRight: '1rem', color: '#3b82f6', border: '1px solid #3b82f6', background: 'transparent', borderRadius: 4, padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        }} style={{ cursor: 'pointer', marginRight: '1rem', color: 'var(--info)', border: '1px solid var(--info)', background: 'transparent', borderRadius: 4, padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
                             <Icon name="RefreshCw" size={14} /> Sync Now
                         </button>
                     )}
-                    <button onClick={handleCreateFolder} style={{ cursor: 'pointer', background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <button onClick={handleCreateFolder} style={{ cursor: 'pointer', background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: 4, color: 'var(--foreground)' }}>
                         <Icon name="FolderPlus" size={18} /> New Topic
                     </button>
-                    <button onClick={() => setIsLinkDialogOpen(true)} style={{ cursor: 'pointer', background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <button onClick={() => setIsLinkDialogOpen(true)} style={{ cursor: 'pointer', background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: 4, color: 'var(--foreground)' }}>
                         <Icon name="Link" size={18} /> Add Link
                     </button>
-                    <button onClick={() => fileInputRef.current?.click()} style={{ cursor: 'pointer', background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <button onClick={() => fileInputRef.current?.click()} style={{ cursor: 'pointer', background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: 4, color: 'var(--foreground)' }}>
                         <Icon name="Upload" size={18} /> Upload Logic
                     </button>
                     <input type="file" ref={fileInputRef} onChange={handleUpload} style={{ display: 'none' }} />
                 </div>
 
                 {/* Breadcrumb ... (unchanged) */}
-                <div style={{ padding: '0.5rem', background: '#f5f5f5', borderRadius: 4, marginBottom: '1rem', fontSize: '0.9rem', color: '#666', display: 'flex', gap: '0.5rem' }}>
+                <div style={{ padding: '0.5rem', background: 'var(--background)', border: '1px solid var(--border)', borderRadius: 4, marginBottom: '1rem', fontSize: '0.9rem', color: 'var(--secondary)', display: 'flex', gap: '0.5rem' }}>
                      {currentPath.split('/').map((part, index, arr) => {
                          // ... breadcrumb logic ...
                          const pathSoFar = arr.slice(0, index + 1).join('/');
@@ -904,7 +912,7 @@ export default function FileExplorer(props: FileExplorerProps) {
                                 >
                                     {part === 'misc' ? 'Home' : part}
                                 </span>
-                                {!isLast && <Icon name="ChevronRight" size={14} style={{ color: '#999' }} />}
+                                {!isLast && <Icon name="ChevronRight" size={14} style={{ color: 'var(--muted)' }} />}
                             </React.Fragment>
                          );
                      })}
@@ -917,7 +925,7 @@ export default function FileExplorer(props: FileExplorerProps) {
                         background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
                         zIndex: 1000
                     }} onClick={(e) => { e.stopPropagation(); setDialogAction(null); setIsLinkDialogOpen(false); }}>
-                        <div style={{ background: 'white', padding: '1.5rem', borderRadius: 8, width: 300 }} onClick={e => e.stopPropagation()}>
+                        <div style={{ background: 'var(--surface)', color: 'var(--foreground)', padding: '1.5rem', borderRadius: 8, width: 300, border: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
                             {isLinkDialogOpen && (
                                 <>
                                     <h3 style={{ margin: '0 0 1rem 0' }}>Add Link Source</h3>
@@ -930,8 +938,8 @@ export default function FileExplorer(props: FileExplorerProps) {
                                         style={{ width: '100%', padding: '0.5rem', marginBottom: '1.5rem' }} 
                                     />
                                     <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
-                                        <button onClick={() => setIsLinkDialogOpen(false)}>Cancel</button>
-                                        <button onClick={handleAddLink} disabled={isFetchingLink} style={{ background: '#007bff', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: 4 }}>
+                                        <button onClick={() => setIsLinkDialogOpen(false)} style={{ color: 'var(--foreground)', background: 'none', border: '1px solid var(--border)', padding: '0.5rem 1rem', borderRadius: 4 }}>Cancel</button>
+                                        <button onClick={handleAddLink} disabled={isFetchingLink} style={{ background: 'var(--accent)', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: 4 }}>
                                             {isFetchingLink ? 'Fetching...' : 'Add'}
                                         </button>
                                     </div>

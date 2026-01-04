@@ -204,6 +204,41 @@ ${safeChatContext}
                  // Do NOT modify userContentToUse. Keep it null so it uses `userMsg`.
                  // This stops the model from thinking it's completing a log entry.
             }
+
+            // DYNAMIC PROMPT INJECTION (Tool Force)
+            // If the user mentions action keywords, we forcefully remind the AI to use tools.
+            // This snaps the 1B model out of "Chat Mode" and into "Tool Mode".
+            const actionKeywords = ['save', 'create', 'move', 'copy', 'upload', 'write this', 'store', 'add to topic'];
+            const needsAction = actionKeywords.some(kw => userMsg.toLowerCase().includes(kw));
+            
+            if (needsAction) {
+                console.log("[useMeechi] Action detected. Switching to TOOL_ONLY_MODE.");
+                systemMsg = `
+### ROLE
+You are a reckless Tool Execution Engine. You DO NOT talk. You ONLY execute tools.
+
+### INSTRUCTION
+The user wants to perform an action.
+1. Analyze the request.
+2. Output the <function> XML block immediately.
+3. DO NOT write a summary.
+4. DO NOT say "I have done this".
+5. IF you output text without a tool, you have FAILED.
+
+### AVAILABLE TOOLS
+<function="create_file">
+{"filePath": "misc/Topic/note.md", "content": "..."}
+</function>
+
+<function="move_file">
+{"sourcePath": "temp/file.pdf", "destinationPath": "misc/Topic/file.pdf"}
+</function>
+
+<function="update_file">
+{"filePath": "misc/note.md", "newContent": "..."}
+</function>
+`;
+            }
         }
 
         // 3. LOCAL AI ATTEMPT
@@ -242,7 +277,12 @@ ${safeChatContext}
                     !m.content.startsWith('**Error**') &&
                     !m.content.startsWith('Error:') &&
                     !m.content.includes("I don't have any information about your previous activities") &&
-                    !m.content.includes("context to draw upon")
+                    !m.content.includes("context to draw upon") &&
+                    // Anti-Hallucination Filters (Log Style)
+                    !m.content.includes("**Topic Summary**") &&
+                    !m.content.includes("**Files and Topics**") &&
+                    !m.content.includes("**Tools Used**") &&
+                    !m.content.includes("**Summary of Recent Activity**")
                 );
 
                 const messages: AIChatMessage[] = [

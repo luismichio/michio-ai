@@ -70,10 +70,8 @@ const DEFAULT_CONFIG: AppConfig = {
     appearance: {
         fontFamily: 'Lora',
         accentColor: '#6B8E6B', // Sage
-        backgroundColor: '#F9F7F2',
-        surfaceColor: '#FFFFFF',
-        foregroundColor: '#1A1C1A',
-        secondaryColor: '#5C635C',
+        // Colors left undefined to allow CSS variables (Light/Dark mode) to take precedence.
+        // User can still override them in settings.
         radius: '0.5rem',
         iconLibrary: 'lucide'
     }

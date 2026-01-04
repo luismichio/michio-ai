@@ -573,36 +573,33 @@ export default function Home() {
 
     // 4. Read Context (Chat & Research)
     let knowledgeContext = "";
-    // ALWAYS run RAG. In Chat mode, it helps with Long-Term Memory (searching history).
-    // In Research mode, it helps with deep knowledge.
-    console.log(`[Page] Mode: ${meechi.mode}. Retrieving Context...`);
     
-    try {
-        knowledgeContext = await storage.getKnowledgeContext(userMsg);
-        console.log(`[Page] RAG Retrieval: ${knowledgeContext.length} chars found`);
-    } catch (err) {
-        console.error("RAG Failed", err);
+    // OPTIMIZED RAG STRATEGY (Jan 2026):
+    // - Research Mode: AUTO RAG (Always retrieve context to ensure accuracy)
+    // - Chat Mode: MANUAL RAG (Skip retrieval here. AI will call 'query_rag' if needed)
+    // - Log Mode: No RAG.
+    
+    if (meechi.mode === 'research') {
+        console.log(`[Page] Research Mode: Retrieving Knowledge Context...`);
+        try {
+            knowledgeContext = await storage.getKnowledgeContext(userMsg);
+            console.log(`[Page] RAG Retrieval: ${knowledgeContext.length} chars found`);
+        } catch (err) {
+            console.error("RAG Failed", err);
+        }
+    } else {
+        console.log(`[Page] Chat/Log Mode: Skipping Auto-RAG. (AI can use 'query_rag' tool if needed)`);
     }
     
-    // Read local conversation history (24h Window for Daily Context)
-    const rawLocalHistory = await storage.getRecentLogs(24);
-    
-    // SAFE TRUNCATION STRATEGY (1B Model Support)
-    // 1. Limit History to recent 2000 chars (Immediate context)
-    const SAFE_HISTORY_LIMIT = 2000;
-    const safeHistory = rawLocalHistory.length > SAFE_HISTORY_LIMIT 
-        ? "..." + rawLocalHistory.substring(rawLocalHistory.length - SAFE_HISTORY_LIMIT) 
-        : rawLocalHistory;
-
     // 2. Limit RAG to 6000 chars (Deep context)
     const SAFE_RAG_LIMIT = 6000;
     const safeRAG = knowledgeContext.length > SAFE_RAG_LIMIT
         ? knowledgeContext.substring(0, SAFE_RAG_LIMIT) + "..."
         : knowledgeContext;
 
-    console.log(`[Page] Context Assembled: RAG(${safeRAG.length}) + History(${safeHistory.length})`);
+    console.log(`[Page] Context Assembled: RAG(${safeRAG.length})`);
     
-    let fullContext = `${safeRAG}\n\n--- Daily History Log (Past 24h of User Activity) ---\n${safeHistory}`;
+    let fullContext = safeRAG;
     if (attachedFiles.length > 0) {
         fullContext += `\n\n[SYSTEM: User has attached files. Look at 'temp/' folder if needed. Tools available: move_file, fetch_url.]`;
         setAttachedFiles([]);

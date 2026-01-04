@@ -327,13 +327,13 @@
 }
 
 /* --- Code Block Styling --- */
-/* --- Code Block Styling --- */
 :global(.ProseMirror) pre {
-  background: #0d0d0d;
-  color: #fff;
+  background: var(--surface);
+  color: var(--foreground);
   font-family: 'JetBrains Mono', monospace;
   padding: 0.75rem 1rem;
   border-radius: 6px;
+  border: 1px solid var(--border);
 
   code {
     color: inherit;
@@ -455,8 +455,8 @@
 
 /* If accent-rgb not defined, fallback */
 .bubbleBtnActive {
-  color: #4f46e5;
-  background: #eef2ff;
+  color: var(--accent);
+  background: var(--overlay);
 }
 
 .bubbleDivider {
@@ -508,12 +508,12 @@
 
 
 .dropdownItem.delete {
-  color: #ff4d4f;
+  color: var(--error);
   border-top: 1px solid var(--border);
 }
 
 .dropdownItem.delete:hover {
-  background: #fff1f0;
+  background: var(--overlay);
 }
 
 @keyframes loadingDots {
@@ -646,9 +646,7 @@
 
 /* Comment Popup Styles */
 .commentPopup {
-  background: var(--surface) !important;
-  background-color: white !important;
-  /* Fallback */
+  background: var(--surface);
   color: var(--foreground);
   padding: 0;
   /* Exact Match for Dropdown Menu Style */
@@ -750,4 +748,5 @@
   }
 }
 
-/* Sidebar icons handled inline in SourceEditor.tsx *//* Force Reload */
+/* Sidebar icons handled inline in SourceEditor.tsx */
+/* Force Reload */

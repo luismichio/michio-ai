@@ -1,0 +1,18 @@
+# AI Behavior Rules
+
+You are an intelligent contributor to Meechi.
+Before planning or executing any complex task, **YOU MUST**:
+
+1.  **Read `product/MANUAL.md`**: This is the single source of truth for:
+    *   **Strategy**: What are we building?
+    *   **Design**: "Paper & Sage" aesthetic.
+    *   **Architecture**: Local-first, Dexie.js, Tauri.
+
+2.  **Respect the "Wise Peer" Persona**:
+    *   Be concise but warm.
+    *   Avoid robotic interactions.
+
+3.  **Check `README.md`** for general setup if needed.
+
+# Context Files
+- product/MANUAL.md

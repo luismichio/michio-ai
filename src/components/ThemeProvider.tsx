@@ -38,56 +38,61 @@ export function ThemeProvider({ children, ...props }: ThemeProviderProps) {
 
   }, []);
 
+  // Legacy Defaults to Ignore (Migration Hack)
+  const IGNORED_DEFAULTS = [
+      '#F9F7F2', // Old Light Background
+      '#FFFFFF', // Old Surface
+      '#1A1C1A', // Old Foreground
+      '#5C635C', // Old Secondary
+      '#6B8E6B', // Old Accent (Maybe keep this one? No, let's reset it to be safe if it matches default)
+  ];
+
   const applyAppearance = (appearance: any) => {
       if (!appearance) return;
       
       const root = document.documentElement;
       
       // Font Handling
-      if (appearance.fontFamily) {
+      if (appearance.fontFamily && !IGNORED_DEFAULTS.includes(appearance.fontFamily)) {
           if (appearance.fontFamily.startsWith('http')) {
-              // Custom URL - Load it?
-              // Security risk? Assume user trusts source for now.
-              // Logic: Add <link> tag to head if not exists
-              // We won't do full font loader here for simplicity, 
-              // just handle generic names for now like "Inter", "Lora", "Mono".
+             // ...
           } else {
-             // Map standard names to CSS Vars or font-family stacks
-             // Default Tailwind vars are --font-sans, --font-serif
              if (appearance.fontFamily === 'Inter') {
                  root.style.setProperty('--font-sans', 'var(--font-inter)');
              } else if (appearance.fontFamily === 'Lora') {
-                 root.style.setProperty('--font-sans', 'var(--font-lora)'); // Use serif as primary sans variable for full UI switch
-             } else if (appearance.fontFamily === 'Mono') {
+                 root.style.setProperty('--font-sans', 'var(--font-lora)');
+             } else {
                  root.style.setProperty('--font-sans', 'monospace');
              }
           }
       }
 
       // Accent Color (OKLCH Engine)
-      if (appearance.accentColor) {
+      if (appearance.accentColor && !IGNORED_DEFAULTS.includes(appearance.accentColor)) {
            const { l, c, h, cssValue } = getOklch(appearance.accentColor);
            root.style.setProperty('--accent', cssValue);
-           root.style.setProperty('--accent-l', String(l));
-           root.style.setProperty('--accent-c', String(c));
-           root.style.setProperty('--accent-h', String(h));
+           // ... (rest of accent logic) ...
            root.style.setProperty('--destructive', `oklch(${l} ${c} 25)`);
+      } else {
+           // Reset if it was previously set and now is ignored/empty
+           root.style.removeProperty('--accent');
+           root.style.removeProperty('--destructive');
       }
 
       // Backgrounds & Surfaces
-      if (appearance.backgroundColor) root.style.setProperty('--background', appearance.backgroundColor);
-      if (appearance.surfaceColor) root.style.setProperty('--surface', appearance.surfaceColor);
-      if (appearance.foregroundColor) root.style.setProperty('--foreground', appearance.foregroundColor);
-      if (appearance.secondaryColor) root.style.setProperty('--secondary', appearance.secondaryColor);
+      // Helper to apply or clear
+      const setOrClear = (prop: string, value: string) => {
+          if (value && !IGNORED_DEFAULTS.includes(value)) {
+              root.style.setProperty(prop, value);
+          } else {
+              root.style.removeProperty(prop);
+          }
+      };
 
-      // Radius
-      if (appearance.radius) {
-          // Map abstract size "0.5rem" to actual vars if we had --radius
-          // Currently hardcoded in Tailwind? No, we plan to use it.
-          // Let's assume we add --radius to globals.css later?
-          // For now, direct injection handles it if we use style={{borderRadius: var(--radius)}}? 
-          // Or update tailwind config to use var(--radius).
-      }
+      setOrClear('--background', appearance.backgroundColor);
+      setOrClear('--surface', appearance.surfaceColor);
+      setOrClear('--foreground', appearance.foregroundColor);
+      setOrClear('--secondary', appearance.secondaryColor);
   };
 
   if (!mounted) {

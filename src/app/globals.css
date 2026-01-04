@@ -4,38 +4,83 @@
 
 :root {
   /* Design Tokens - Light (Warmer Paper) */
-  --background: #F9F7F2;
+  /* OKLCH values from MANUAL.md */
+
+  /* Foundation */
+  --surface: oklch(97% 0.01 80);
   /* Warm Paper */
-  --surface: #FFFFFF;
-  /* Pure White */
-  --foreground: #1A1C1A;
-  /* Ink Black */
-  --secondary: #5C635C;
-  /* Slate Sage */
-  --accent: #6B8E6B;
-  /* Classic Sage */
-  --border: #E2E8E2;
-  /* Light Stroke */
+  --background: oklch(99% 0.005 80);
+  /* Lighter Paper */
+  --primary: oklch(58% 0.08 145);
+  /* Sage Green */
+  --foreground: oklch(20% 0 0);
+  /* Soft Black (Text) */
+  --muted: oklch(55% 0.01 80);
+  /* Faded Ink */
+  --accent: oklch(58% 0.08 145);
+  /* Matches Primary for now */
+  --secondary: oklch(55% 0.01 80);
+  /* Muted equivalent */
+
+  /* Semantic */
+  --success: oklch(62% 0.12 150);
+  /* Forest Affirmation */
+  --warning: oklch(68% 0.15 75);
+  /* Amber Caution */
+  --error: oklch(58% 0.18 25);
+  /* Terracotta Alert */
+  --info: oklch(62% 0.10 230);
+  /* Slate Blue */
+
+  /* Interactive */
+  --border: oklch(85% 0.01 80);
+  /* Subtle Line */
+  --hover: oklch(92% 0.01 80);
+  /* Gentle Lift */
+  --focus: oklch(58% 0.08 145);
+  /* Sage Ring */
   --overlay: rgba(107, 142, 107, 0.1);
 
+  /* Fonts */
   --font-sans: var(--font-inter);
   --font-serif: var(--font-lora);
 }
 
 .dark {
-  /* Design Tokens - Dark (Deep Obsidian) */
-  --background: #121412;
-  /* Deep Obsidian Sage */
-  --surface: #1E211E;
-  /* Elevated Sage Gray */
-  --foreground: #E0E4E0;
-  /* Soft Silver Sage */
-  --secondary: #9BA39B;
-  /* Muted Moss */
-  --accent: #8FBC8F;
-  /* Desaturated Seafoam */
-  --border: #2D332D;
-  /* Dark Stroke */
+  /* Design Tokens - Dark (Deep Forest) */
+  /* OKLCH values from MANUAL.md */
+
+  /* Foundation */
+  --surface: oklch(15% 0.02 150);
+  /* Deep Mossy Charcoal */
+  --background: oklch(12% 0.02 150);
+  /* Darker Forest */
+  --primary: oklch(65% 0.15 140);
+  /* Luminous Sage */
+  --foreground: oklch(92% 0.01 100);
+  /* Mist White (Text) */
+  --muted: oklch(60% 0.02 150);
+  /* Fog */
+  --accent: oklch(65% 0.15 140);
+  --secondary: oklch(60% 0.02 150);
+
+  /* Semantic */
+  --success: oklch(68% 0.15 145);
+  /* Bright Moss */
+  --warning: oklch(75% 0.18 80);
+  /* Warm Glow */
+  --error: oklch(65% 0.20 25);
+  /* Ember */
+  --info: oklch(70% 0.12 230);
+  /* Moonlit Blue */
+
+  /* Interactive */
+  --border: oklch(25% 0.02 150);
+  /* Shadow Line */
+  --hover: oklch(20% 0.02 150);
+  /* Subtle Depth */
+  --focus: oklch(65% 0.15 140);
+  /* Luminous Ring */
   --overlay: rgba(143, 188, 143, 0.1);
 }
 
@@ -92,7 +137,8 @@ h6 {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--accent);
+  background: var(--primary);
+  /* Updated to use variable */
   opacity: 0.5;
   border-radius: 4px;
 }

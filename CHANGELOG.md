@@ -3,7 +3,27 @@
 
 
 
-### v1.2.0 - The Autonomous Desktop (Jan 2026)
+### v0.9.99-beta - The MCP & RAG Engine (Jan 4, 2026)
+*   **MCP (Model Context Protocol)**:
+    *   **Internal Server**: Implemented an in-memory MCP server (`src/lib/mcp`) to handle all local tools.
+    *   **New Tools**: 
+        *   `read_pdf`: Text extraction via `pdfjs-dist`.
+        *   `summarize_file`: Local/Cloud summarization.
+        *   `fetch_html`: Clean web scraping via `cheerio`.
+        *   `query_rag`: Manual knowledge base access.
+*   **RAG Engine Optimization**:
+    *   **Hybrid Strategy**: Differentiated behavior for `chat` (Speed/Manual RAG) vs `research` (Depth/Auto RAG).
+    *   **Chat Latency**: Reduced to near-zero by skipping default search steps.
+    *   **Context Injection**: Updated `McpServer.ts` to expose `query_rag` as a tool for the AI.
+*   **AI Persona & Stability**:
+    *   **Anti-Hallucination**: Implemented a "Nuclear Option" hard-override prompt that temporarily switches the AI to a "Tool Execution Engine" persona when action keywords (Save/Move/Create) are detected.
+    *   **History Sanitization**: Added filters to `useMeechi.ts` to strip previous hallucinated logs from the context window.
+    *   **Prompt Engineering**: Strict XML enforcement for 1B model compatibility.
+*   **Fixes**:
+    *   **Upload Error**: Restored `/api/ai/summarize` route to fix 404 errors during file drops.
+    *   **Settings Persistence**: Fixed dark mode flash issues.
+
+### v1.2.0 - The Autonomous Desktop (Jan 3, 2026)
 *   **Static Desktop Architecture**:
     *   **Serverless Core**: The application can now be built as a purely static export (`next export`), enabling native desktop apps without a Node.js backend.
     *   **Client-Side AI**: Refactored `useMeechi.ts` to call Groq and Gemini APIs directly from the client when in desktop mode, ensuring full AI functionality without server API routes.

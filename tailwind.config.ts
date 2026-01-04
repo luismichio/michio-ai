@@ -11,15 +11,29 @@ const config: Config = {
     extend: {
       fontFamily: {
         sans: ["var(--font-inter)", "sans-serif"],
-        serif: ["var(--font-merriweather)", "serif"],
+        serif: ["var(--font-lora)", "serif"],
       },
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
         surface: "var(--surface)",
+        primary: "var(--primary)",
         secondary: "var(--secondary)",
+        muted: "var(--muted)",
         accent: "var(--accent)",
         border: "var(--border)",
+        
+        /* Semantic Tokens */
+        success: "var(--success)",
+        warning: "var(--warning)",
+        error: "var(--error)",
+        info: "var(--info)",
+
+        /* Interactive Tokens */
+        hover: "var(--hover)",
+        focus: "var(--focus)",
+
+        /* Legacy/Utility mappings */
         paper: {
              DEFAULT: "#F9F7F2",
              dark: "#121412",

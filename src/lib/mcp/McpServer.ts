@@ -1,5 +1,8 @@
 import { McpTool, McpResource } from './types';
 import { LocalStorageProvider } from '../storage/local';
+import { extractTextFromPdf } from '../pdf';
+import { generateSummary } from '../ai/summarizer';
+import * as cheerio from 'cheerio';
 
 /**
  * Internal MCP Server Implementation
@@ -185,6 +188,191 @@ export class McpServer {
                 return { 
                     success: true, 
                     message: `Cleaned up ${deletedCount} orphans.\nDeleted: ${deletedFiles.join(', ')}` 
+                };
+            }
+        });
+
+        // ------------------------------------------------------------------
+        // NEW TOOLS (Jan 2026)
+        // ------------------------------------------------------------------
+
+        // Tool: read_pdf
+        this.registerTool({
+            name: "read_pdf",
+            description: "Read text from a PDF file stored in Meechi.",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    filePath: { type: "string", description: "Path to the PDF file (e.g. misc/paper.pdf)" }
+                },
+                required: ["filePath"]
+            },
+            handler: async (args) => {
+                await this.storage.init();
+                let path = args.filePath.replace(/\\/g, '/');
+                if (!path.startsWith('misc/') && !path.startsWith('history/')) path = `misc/${path}`;
+                
+                // Read binary as ArrayBuffer
+                // LocalStorageProvider needs support for ArrayBuffer reading?
+                // The current implementation might be string-focused. 
+                // Let's assume we can get it or we might need to update storage provider.
+                // Wait, LocalStorageProvider wraps IndexedDB (which supports Blobs/Buffers).
+                // Let's check if readFile returns specific type or we need cast.
+                // The interface says Promise<string | ArrayBuffer | Blob | null>.
+                const fileData = await this.storage.readFile(path);
+                
+                if (!fileData) throw new Error(`File not found: ${path}`);
+                
+                // Ensure ArrayBuffer
+                let buffer: ArrayBuffer;
+                if (fileData instanceof ArrayBuffer) {
+                    buffer = fileData;
+                } else if (fileData instanceof Blob) {
+                    buffer = await fileData.arrayBuffer();
+                } else if (typeof fileData === 'string') {
+                     // Try to convert base64 if it was stored as string? Or throw?
+                     // For now, assume PDF logic only works on Buffers.
+                     throw new Error("File stored as string, expected binary for PDF.");
+                } else {
+                     throw new Error("Unknown file format for PDF.");
+                }
+
+                console.log(`[MCP] Reading PDF: ${path}`);
+                const text = await extractTextFromPdf(buffer);
+                
+                // Truncate for sanity? 
+                // 50k chars is a reasonable "preview" limit for a tool return.
+                const truncated = text.length > 50000 ? text.substring(0, 50000) + "\n...(truncated)" : text;
+
+                return {
+                    success: true,
+                    message: `Read ${path} (${text.length} chars)`,
+                    data: truncated
+                };
+            }
+        });
+
+        // Tool: summarize_file
+        this.registerTool({
+            name: "summarize_file",
+            description: "Generate a summary of a text or markdown file.",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    filePath: { type: "string", description: "Path to file" }
+                },
+                required: ["filePath"]
+            },
+            handler: async (args) => {
+                await this.storage.init();
+                let path = args.filePath.replace(/\\/g, '/');
+                if (!path.startsWith('misc/') && !path.startsWith('history/')) path = `misc/${path}`;
+
+                const content = await this.storage.readFile(path);
+                if (!content || typeof content !== 'string') {
+                    throw new Error(`File not found or not text: ${path}`);
+                }
+
+                console.log(`[MCP] Summarizing: ${path}`);
+                const summary = await generateSummary(content);
+                
+                return {
+                    success: true,
+                    message: `Summary of ${path}`,
+                    data: summary
+                };
+            }
+        });
+
+        // Tool: fetch_html
+        this.registerTool({
+            name: "fetch_html",
+            description: "Fetch a URL and return its text content (Markdown-friendly).",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    url: { type: "string", description: "The HTTP/HTTPS URL to fetch" }
+                },
+                required: ["url"]
+            },
+            handler: async (args) => {
+                try {
+                    console.log(`[MCP] Fetching: ${args.url}`);
+                    const res = await fetch(args.url, {
+                        headers: {
+                            'User-Agent': 'Meechi/1.0 (Local Friend)'
+                        }
+                    });
+                    
+                    if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+                    
+                    const html = await res.text();
+                    
+                    // Simple HTML -> Text Cleaning using Cheerio
+                    const $ = cheerio.load(html);
+                    
+                    // Remove junk
+                    $('script').remove();
+                    $('style').remove();
+                    $('nav').remove();
+                    $('footer').remove();
+                    $('iframe').remove();
+                    
+                    // Extract text (naive approach for now, usually sufficient for LLM)
+                    // Better approach: preserve headers
+                    let markdown = "";
+                    
+                    // Iterate over key block elements
+                    $('h1, h2, h3, p, li, pre').each((_, el) => {
+                         const tag = el.tagName;
+                         const text = $(el).text().trim();
+                         if (!text) return;
+                         
+                         if (tag === 'h1') markdown += `# ${text}\n\n`;
+                         else if (tag === 'h2') markdown += `## ${text}\n\n`;
+                         else if (tag === 'h3') markdown += `### ${text}\n\n`;
+                         else if (tag === 'li') markdown += `- ${text}\n`;
+                         else if (tag === 'pre') markdown += `\`\`\`\n${text}\n\`\`\`\n\n`;
+                         else markdown += `${text}\n\n`;
+                    });
+
+                    // Truncate
+                    const truncated = markdown.length > 20000 ? markdown.substring(0, 20000) + "\n...(truncated)" : markdown;
+                    
+                    return {
+                        success: true,
+                        message: `Fetched ${args.url}`,
+                        data: truncated
+                    };
+
+                } catch (e: any) {
+                     return { error: `Fetch Failed: ${e.message}` };
+                }
+            }
+        });
+
+        // Tool: query_rag
+        this.registerTool({
+            name: "query_rag",
+            description: "Search the internal knowledge base (Sources & Notes) for information.",
+            inputSchema: {
+                type: "object",
+                properties: {
+                    query: { type: "string", description: "The search query (e.g. 'What is the refund policy?')" }
+                },
+                required: ["query"]
+            },
+            handler: async (args) => {
+                await this.storage.init();
+                console.log(`[MCP] Doing Manual RAG Search: ${args.query}`);
+                
+                // Reuse the existing robust RAG logic from LocalStorageProvider
+                const context = await this.storage.getKnowledgeContext(args.query);
+                
+                return {
+                    success: true,
+                    message: "Search Complete",
+                    data: context
                 };
             }
         });

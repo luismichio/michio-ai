@@ -1426,7 +1426,9 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                                              top: commentPopupPos.top, // Removed +10 - positioning logic handles spacing
                                              left: commentPopupPos.left,
                                              zIndex: 10000,
-                                             backgroundColor: '#ffffff',
+                                             backgroundColor: 'var(--surface)',
+                                             color: 'var(--foreground)',
+                                             border: '1px solid var(--border)',
                                              width: commentPopupPos.width || 260,
                                              maxWidth: '90vw'
                                          }}
@@ -1517,7 +1519,7 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                                                         className={styles.commentActionBtn}
                                                         onClick={() => handleDeleteComment(comment.id)}
                                                         title="Delete Comment"
-                                                        style={{ color: '#ef4444' }} // Red for delete
+                                                        style={{ color: 'var(--error)' }} // Red for delete
                                                     >
                                                         {/* Trash Icon */}
                                                         <Icon name="Trash2" size={14} />
@@ -1686,7 +1688,7 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                 .ProseMirror p.is-editor-empty:first-child::before {
                     content: attr(data-placeholder);
                     float: left;
-                    color: #adb5bd;
+                    color: var(--muted);
                     pointer-events: none;
                     height: 0;
                 }
@@ -1694,21 +1696,23 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                 /* Bubble Menu */
                 .${styles.bubbleMenu} {
                     display: flex;
-                    background: #333;
+                    background: var(--surface);
+                    border: 1px solid var(--border);
                     border-radius: 6px;
                     padding: 0.2rem;
                 }
                 .${styles.bubbleMenu} button {
                     background: none;
-                    color: white;
+                    color: var(--foreground);
                     border: none;
                     padding: 0.3rem 0.6rem;
                     cursor: pointer;
                     font-size: 0.8rem;
                 }
                 .${styles.bubbleMenu} button:hover, .${styles.bubbleMenu} button.is-active {
-                    background: #555;
+                    background: var(--overlay);
                     border-radius: 4px;
+                    color: var(--accent);
                 }
                 
                 /* Comment Icon Widget */
@@ -1773,14 +1777,14 @@ export default function SourceEditor({ file, onSave, onUpdateMetadata, onClose }
                 /* Link Styling */
                 .ProseMirror a, 
                 .ProseMirror a * {
-                    color: #2563eb !important; /* Standard Blue for clear visibility */
+                    color: var(--info) !important; /* Standard Blue for clear visibility */
                     text-decoration: underline !important;
                     text-decoration-thickness: 1.5px !important;
                     text-underline-offset: 3px;
                     cursor: pointer !important;
                 }
                 .ProseMirror a:hover {
-                    color: #1d4ed8 !important;
+                    color: var(--accent) !important;
                     text-decoration-thickness: 2px !important;
                 }
             `}</style>

@@ -13,15 +13,19 @@ export function ThemeSwitcher() {
   }, []);
 
   if (!mounted) {
-    return <div className="w-8 h-8" />; // Placeholder
+    return (
+      <div className="flex items-center gap-2 p-1 bg-surface/10 rounded-full border border-border backdrop-blur-sm opacity-0">
+         <div className="w-8 h-8" />
+      </div>
+    );
   }
 
   return (
-    <div className="flex items-center gap-2 p-1 bg-white/10 rounded-full border border-white/10 backdrop-blur-sm">
+    <div className="flex items-center gap-2 p-1 bg-surface/10 rounded-full border border-border backdrop-blur-sm">
       <button
         onClick={() => setTheme("light")}
         className={`p-1.5 rounded-full transition-colors ${
-          theme === 'light' ? 'bg-accent text-white' : 'text-zinc-400 hover:text-accent'
+          theme === 'light' ? 'bg-accent text-surface' : 'text-muted hover:text-accent'
         }`}
         title="Light Mode"
       >
@@ -30,7 +34,7 @@ export function ThemeSwitcher() {
       <button
         onClick={() => setTheme("system")}
         className={`p-1.5 rounded-full transition-colors ${
-          theme === 'system' ? 'bg-accent text-white' : 'text-zinc-400 hover:text-accent'
+          theme === 'system' ? 'bg-accent text-surface' : 'text-muted hover:text-accent'
         }`}
         title="System Mode"
       >
@@ -39,7 +43,7 @@ export function ThemeSwitcher() {
       <button
         onClick={() => setTheme("dark")}
         className={`p-1.5 rounded-full transition-colors ${
-          theme === 'dark' ? 'bg-accent text-white' : 'text-zinc-400 hover:text-accent'
+          theme === 'dark' ? 'bg-accent text-surface' : 'text-muted hover:text-accent'
         }`}
         title="Dark Mode"
       >

@@ -1,5 +1,6 @@
-'use client';
+import React from 'react';
 import { AppConfig } from '@/lib/settings';
+import { useTheme } from 'next-themes';
 
 interface AppearanceSettingsProps {
     config: AppConfig;
@@ -7,11 +8,19 @@ interface AppearanceSettingsProps {
 }
 
 export function AppearanceSettings({ config, updateConfig }: AppearanceSettingsProps) {
+    const { theme, setTheme } = useTheme();
+    
     const themes = [
         { id: 'system', label: 'System Default' },
         { id: 'light', label: 'Light (Paper)' },
         { id: 'dark', label: 'Dark (Obsidian)' }
     ] as const;
+
+    // Mounted state to avoid hydration mismatch
+    const [mounted, setMounted] = React.useState(false);
+    React.useEffect(() => setMounted(true), []);
+
+    if (!mounted) return null;
 
     return (
         <div>
@@ -25,11 +34,15 @@ export function AppearanceSettings({ config, updateConfig }: AppearanceSettingsP
                     </label>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
                         {themes.map((t) => {
-                            const isActive = config.theme === t.id;
+                            const isActive = theme === t.id;
                             return (
                                 <button
                                     key={t.id}
-                                    onClick={() => updateConfig({ theme: t.id })}
+                                    onClick={() => {
+                                        setTheme(t.id);
+                                        // Optional: Keep config in sync if legacy logic needs it
+                                        updateConfig({ theme: t.id });
+                                    }}
                                     style={{
                                         padding: '12px',
                                         borderRadius: 'var(--radius, 8px)',
@@ -131,20 +144,22 @@ export function AppearanceSettings({ config, updateConfig }: AppearanceSettingsP
                             const defaults = {
                                 fontFamily: 'Lora',
                                 accentColor: '#6B8E6B',
-                                backgroundColor: '#F9F7F2',
-                                surfaceColor: '#FFFFFF',
-                                foregroundColor: '#1A1C1A',
-                                secondaryColor: '#5C635C',
+                                // Clear these to allow theme to take over
+                                backgroundColor: undefined,
+                                surfaceColor: undefined,
+                                foregroundColor: undefined,
+                                secondaryColor: undefined,
                                 radius: '0.5rem',
                                 iconLibrary: 'lucide' as const
                             };
                             updateConfig({ appearance: defaults });
-                            // Force reload styles via event or direct set
-                            // For simplicity, let the page re-render trigger effect or manually set:
-                            document.documentElement.style.setProperty('--background', defaults.backgroundColor);
-                            document.documentElement.style.setProperty('--surface', defaults.surfaceColor);
-                            document.documentElement.style.setProperty('--foreground', defaults.foregroundColor);
-                            document.documentElement.style.setProperty('--accent', defaults.accentColor);
+                            
+                            // Force clear inline styles directly for immediate feedback
+                            document.documentElement.style.removeProperty('--background');
+                            document.documentElement.style.removeProperty('--surface');
+                            document.documentElement.style.removeProperty('--foreground');
+                            document.documentElement.style.removeProperty('--secondary');
+                            document.documentElement.style.removeProperty('--accent');
                         }}
                         style={{
                             padding: '8px 16px',

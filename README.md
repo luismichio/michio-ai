@@ -2,8 +2,10 @@
 
 **Meechi** is a private cognitive layer designed to walk beside you, not just work for you. Unlike traditional "assistants" that perform tasks, Meechi is a **Travel Partner**—a wise peer that documents your unique journey, connects your fragmented thoughts, and helps you navigate life with clarity.
 
+
 > **Privacy First**: Your thoughts belong to you. Meechi runs locally. No data is sent to our servers.
 > **Bring Your Own Brain**: Connect your own AI (Gemini/Groq) and Storage (Google Drive) for complete control.
+> **Developer Context**: Working on Meechi? Read the [Product Manual](./product/MANUAL.md) first.
 
 ---
 
@@ -101,16 +103,17 @@ Meechi is built with the latest web technologies to ensure speed, privacy, and r
 
 ## 📜 Development Changelog
 
-### v0.9.99 - The Desktop Era (Jan 2026)
-*   **Meechi Desktop**: First official desktop release (Windows MSI / macOS DMG).
+### v0.9.99-beta - The Desktop Era (Jan 4, 2026)
+*   **Meechi Desktop**: First official desktop release (Windows MSI in progress).
     *   **Bundled App**: Runs locally with no browser required.
-    *   **System Tray**: Quick access to your companion.
-    *   **Local Proxy**: Acts as a "Local Cloud" server to sync data with other browsers on your network.
-*   **Settings Redesign**: A completely overhauled, Google-style settings interface.
-    *   **Sidebar Navigation**: Persistent access to Profile, Appearance, AI, and Storage.
-    *   **Appearance Customization**: Real-time color pickers (Accent, Background, Surface) and Font controls.
-    *   **AI Management**: Drag-and-drop provider ordering and simplified model selection.
-*   **Browser Sync**: Sync your "Ship's Log" across Chrome, Safari, and Desktop using the file system as the bridge.
+*   **Feature: Optimized RAG (Hybrid Mode)**:
+    *   **Chat Mode**: Instant responses (Manual RAG via Tools).
+    *   **Research Mode**: Deep context (Automatic RAG).
+*   **Feature: Internal MCP Server**:
+    *   **Local Tools**: Creating, moving, and reading files is now handled by an embedded MCP server (`src/lib/mcp`).
+    *   **New Capabilities**: Parsing local PDFs (`read_pdf`) and cleaning web pages (`fetch_html`) completely offline.
+*   **Refinement: The "Nuclear" Logic**:
+    *   Implemented strict "Act, Don't Talk" protocols for the 1B Model to ensure reliable tool usage.
 
 ### 📦 Building for Desktop
 To build the standalone desktop application (Windows/macOS/Linux):
